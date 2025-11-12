@@ -56,15 +56,15 @@ async function createTestUser() {
     // Create test admin account
     const admin = await prisma.user.create({
       data: {
-        email: 'admin@test.com',
+        email: 'infoajumapro@gmail.com',
         password: hashedPassword,
-        name: 'Test Admin',
+        name: 'Admin',
         role: 'ADMIN',
         phone: '123-456-7892',
       }
     })
     console.log('\n✅ Created admin account:')
-    console.log('   Email: admin@test.com')
+    console.log('   Email: infoajumapro@gmail.com')
     console.log('   Password: test1234')
     console.log('   ID:', admin.id)
 

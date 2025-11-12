@@ -232,11 +232,11 @@ function SignInForm() {
             >
               Forgot your password?
             </Link>
-            {process.env.NODE_ENV === 'development' && (
-              <p className="text-xs text-gray-500">
-                Test accounts: parent@test.com, tutor@test.com, admin@test.com (password: test1234)
-              </p>
-            )}
+                {process.env.NODE_ENV === 'development' && (
+                  <p className="text-xs text-gray-500">
+                    Test accounts: parent@test.com, tutor@test.com, infoajumapro@gmail.com (password: test1234)
+                  </p>
+                )}
           </div>
         </form>
       </div>

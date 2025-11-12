@@ -12,7 +12,7 @@ async function testLogin() {
     const testUsers = await prisma.user.findMany({
       where: {
         email: {
-          in: ['parent@test.com', 'tutor@test.com', 'admin@test.com']
+          in: ['parent@test.com', 'tutor@test.com', 'infoajumapro@gmail.com']
         }
       },
       select: {
