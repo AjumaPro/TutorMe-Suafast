@@ -89,13 +89,12 @@ export default function DashboardSidebar() {
       >
         {/* Logo */}
         <div className="p-6 border-b border-gray-200">
-          <Link href="/" className="flex items-center gap-2" onClick={() => setIsMobileOpen(false)}>
+          <Link href="/" className="flex items-center" onClick={() => setIsMobileOpen(false)}>
             <img 
               src="/logo.png" 
               alt="Suafast" 
               className="h-8 w-auto"
             />
-            <h1 className="text-xl font-bold text-gray-800">Suafast</h1>
           </Link>
         </div>
 
