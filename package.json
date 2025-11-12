@@ -1,7 +1,7 @@
 {
-  "name": "tutorme",
+  "name": "suafast",
   "version": "1.0.0",
-  "description": "End-to-end tutoring marketplace platform",
+  "description": "Suafast - End-to-end tutoring marketplace platform",
   "private": true,
   "scripts": {
     "dev": "node server.js",

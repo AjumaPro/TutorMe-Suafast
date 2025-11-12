@@ -1,4 +1,4 @@
-# TutorMe - Tutoring Marketplace Platform
+# Suafast - Tutoring Marketplace Platform
 
 An end-to-end tutoring marketplace that connects students with verified tutors for both in-person and online lessons.
 
@@ -43,7 +43,7 @@ An end-to-end tutoring marketplace that connects students with verified tutors f
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd TutorMe
+   cd Suafast
    ```
 
 2. **Install dependencies**
@@ -81,7 +81,7 @@ An end-to-end tutoring marketplace that connects students with verified tutors f
 ## 📁 Project Structure
 
 ```
-TutorMe/
+Suafast/
 ├── app/                    # Next.js app directory
 │   ├── api/               # API routes
 │   ├── auth/              # Authentication pages

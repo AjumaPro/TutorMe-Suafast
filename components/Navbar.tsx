@@ -24,8 +24,12 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <Link href="/" className="flex items-center gap-2">
-            <BookOpen className="h-6 w-6 text-pink-600" />
-            <h1 className="text-xl font-bold text-gray-800">TutorMe</h1>
+            <img 
+              src="/logo.png" 
+              alt="Suafast" 
+              className="h-8 w-auto"
+            />
+            <h1 className="text-xl font-bold text-gray-800">Suafast</h1>
           </Link>
           
           {session ? (

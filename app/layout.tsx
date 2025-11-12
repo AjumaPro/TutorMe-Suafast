@@ -6,7 +6,7 @@ import { Providers } from './providers'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'TutorMe - Find Your Perfect Tutor',
+  title: 'Suafast - Find Your Perfect Tutor',
   description: 'Connect with verified tutors for in-person and online lessons',
 }
 

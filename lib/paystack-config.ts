@@ -24,11 +24,11 @@ export const paystackConfig = {
   // URL to your logo image (recommended: 200x50px PNG, hosted on HTTPS)
   // Example: 'https://yourdomain.com/images/logo.png'
   
-  title: 'TutorMe - Complete Your Payment',
+  title: 'Suafast - Complete Your Payment',
   description: 'Secure payment for your tutoring session',
   
   // Colors (hex codes) - Note: These are for reference, actual styling is done via Payment Pages
-  primaryColor: '#EC4899', // Pink-500 (matches TutorMe theme)
+  primaryColor: '#EC4899', // Pink-500 (matches Suafast theme)
   secondaryColor: '#F3F4F6', // Gray-100
   
   // Payment channels to display on checkout page
