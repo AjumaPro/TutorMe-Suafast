@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 
 export async function GET(request: Request) {
   try {
@@ -17,22 +17,12 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const format = searchParams.get('format') || 'json'
 
-    // Fetch all user data
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      include: {
-        tutorProfile: true,
-        bookings: {
-          include: {
-            tutor: { include: { user: { select: { name: true, email: true } } } },
-            payment: true,
-            review: true,
-          },
-        },
-        reviews: true,
-        addresses: true,
-      },
-    })
+    // Fetch user data
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', session.user.id)
+      .single()
 
     if (!user) {
       return NextResponse.json(
@@ -40,6 +30,75 @@ export async function GET(request: Request) {
         { status: 404 }
       )
     }
+
+    // Fetch tutor profile
+    const { data: tutorProfile } = await supabase
+      .from('tutor_profiles')
+      .select('*')
+      .eq('userId', session.user.id)
+      .single()
+
+    // Fetch bookings
+    const { data: bookingsData } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('studentId', session.user.id)
+
+    const bookings = bookingsData || []
+    const bookingsWithRelations = await Promise.all(
+      bookings.map(async (booking) => {
+        let tutor = null
+        let tutorUser = null
+        if (booking.tutorId) {
+          const { data: tutorData } = await supabase
+            .from('tutor_profiles')
+            .select('*')
+            .eq('id', booking.tutorId)
+            .single()
+          tutor = tutorData
+
+          if (tutor?.userId) {
+            const { data: userData } = await supabase
+              .from('users')
+              .select('name, email')
+              .eq('id', tutor.userId)
+              .single()
+            tutorUser = userData
+          }
+        }
+
+        const { data: payment } = await supabase
+          .from('payments')
+          .select('*')
+          .eq('bookingId', booking.id)
+          .single()
+
+        const { data: review } = await supabase
+          .from('reviews')
+          .select('*')
+          .eq('bookingId', booking.id)
+          .single()
+
+        return {
+          ...booking,
+          tutor: tutor ? { ...tutor, user: tutorUser } : null,
+          payment: payment || null,
+          review: review || null,
+        }
+      })
+    )
+
+    // Fetch reviews
+    const { data: reviews } = await supabase
+      .from('reviews')
+      .select('*')
+      .eq('studentId', session.user.id)
+
+    // Fetch addresses
+    const { data: addresses } = await supabase
+      .from('addresses')
+      .select('*')
+      .eq('userId', session.user.id)
 
     // Prepare export data
     const exportData = {
@@ -49,10 +108,10 @@ export async function GET(request: Request) {
         phone: user.phone,
         createdAt: user.createdAt,
       },
-      tutorProfile: user.tutorProfile,
-      bookings: user.bookings,
-      reviews: user.reviews,
-      addresses: user.addresses,
+      tutorProfile: tutorProfile || null,
+      bookings: bookingsWithRelations,
+      reviews: reviews || [],
+      addresses: addresses || [],
       exportDate: new Date().toISOString(),
     }
 

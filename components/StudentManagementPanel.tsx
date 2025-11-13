@@ -382,8 +382,8 @@ function RemoveBookingModal({ booking, onClose, onRemove, loading }: any) {
         <div className="p-6">
           <h3 className="text-xl font-semibold text-gray-800 mb-4">Remove from Class</h3>
           <p className="text-gray-600 mb-6">
-            Are you sure you want to remove <strong>{booking.student.name}</strong> from{' '}
-            <strong>{booking.tutor.user.name}</strong>&apos;s class ({booking.subject})?
+            Are you sure you want to remove <strong>{booking.student?.name || 'Unknown Student'}</strong> from{' '}
+            <strong>{booking.tutor?.user?.name || 'Unknown Tutor'}</strong>&apos;s class ({booking.subject})?
             This will cancel the booking.
           </p>
           <div className="flex gap-3">
@@ -534,7 +534,7 @@ function ReassignBookingModal({ booking, students, tutors, onClose, onReassign, 
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Price ($)
+                  Price (₵)
                 </label>
                 <input
                   type="number"

@@ -2,7 +2,8 @@ import { redirect } from 'next/navigation'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import Navbar from '@/components/Navbar'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
+import { formatCurrency, parseCurrencyCode } from '@/lib/currency'
 import Link from 'next/link'
 import {
   Calendar,
@@ -15,6 +16,7 @@ import {
   AlertCircle,
   Play,
   FileText,
+  CreditCard,
 } from 'lucide-react'
 
 export default async function LessonsPage({
@@ -35,65 +37,110 @@ export default async function LessonsPage({
   let tutorProfile = null
 
   if (session.user.role === 'PARENT') {
-    const where: any = {
-      studentId: session.user.id,
-    }
-
+    let query = supabase
+      .from('bookings')
+      .select('*')
+      .eq('studentId', session.user.id)
+    
     if (statusFilter && statusFilter !== 'all') {
-      where.status = statusFilter.toUpperCase()
+      query = query.eq('status', statusFilter.toUpperCase())
     }
-
-    bookings = await prisma.booking.findMany({
-      where,
-      include: {
-        tutor: {
-          include: {
-            user: {
-              select: {
-                name: true,
-                email: true,
-                image: true,
-              },
-            },
-          },
-        },
-        payment: true,
-        review: true,
-      },
-      orderBy: {
-        scheduledAt: 'desc',
-      },
-    })
+    
+    query = query.order('scheduledAt', { ascending: false })
+    
+    const { data: bookingsData } = await query
+    bookings = bookingsData || []
+    
+    // Fetch related data
+    for (const booking of bookings) {
+      if (booking.tutorId) {
+        const { data: tutor } = await supabase
+          .from('tutor_profiles')
+          .select('*')
+          .eq('id', booking.tutorId)
+          .single()
+        
+        if (tutor) {
+          booking.tutor = tutor
+          if (tutor.userId) {
+            const { data: tutorUser } = await supabase
+              .from('users')
+              .select('name, email, image')
+              .eq('id', tutor.userId)
+              .single()
+            booking.tutor.user = tutorUser || null
+          }
+        }
+      }
+      
+      // Fetch payment and review
+      const { data: payment } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('bookingId', booking.id)
+        .single()
+      
+      const { data: review } = await supabase
+        .from('reviews')
+        .select('*')
+        .eq('bookingId', booking.id)
+        .single()
+      
+      booking.payment = payment || null
+      booking.review = review || null
+    }
   } else if (session.user.role === 'TUTOR') {
-    tutorProfile = await prisma.tutorProfile.findUnique({
-      where: { userId: session.user.id },
-    })
+    const { data: tutorProfileData } = await supabase
+      .from('tutor_profiles')
+      .select('*')
+      .eq('userId', session.user.id)
+      .single()
+    
+    tutorProfile = tutorProfileData || null
 
-    const where: any = {
-      tutorId: tutorProfile?.id || '',
+    if (tutorProfile?.id) {
+      let query = supabase
+        .from('bookings')
+        .select('*')
+        .eq('tutorId', tutorProfile.id)
+      
+      if (statusFilter && statusFilter !== 'all') {
+        query = query.eq('status', statusFilter.toUpperCase())
+      }
+      
+      query = query.order('scheduledAt', { ascending: false })
+      
+      const { data: bookingsData } = await query
+      bookings = bookingsData || []
+      
+      // Fetch related data
+      for (const booking of bookings) {
+        if (booking.studentId) {
+          const { data: student } = await supabase
+            .from('users')
+            .select('name, email, image')
+            .eq('id', booking.studentId)
+            .single()
+          booking.student = student || null
+        }
+        
+        // Fetch payment and review
+        const { data: payment } = await supabase
+          .from('payments')
+          .select('*')
+          .eq('bookingId', booking.id)
+          .single()
+        
+        const { data: review } = await supabase
+          .from('reviews')
+          .select('*')
+          .eq('bookingId', booking.id)
+          .single()
+        
+        booking.payment = payment || null
+        booking.review = review || null
+      }
     }
-
-    if (statusFilter && statusFilter !== 'all') {
-      where.status = statusFilter.toUpperCase()
-    }
-
-    bookings = await prisma.booking.findMany({
-      where,
-      include: {
-        student: {
-          select: {
-            name: true,
-            email: true,
-            image: true,
-          },
-        },
-        payment: true,
-        review: true,
-      },
-      orderBy: {
-        scheduledAt: 'desc',
-      },
-    })
   }
 
   const statusCounts = {
@@ -312,9 +359,9 @@ export default async function LessonsPage({
                     <div className="flex flex-col items-end gap-3">
                       <div className="text-right">
                         <p className="text-2xl font-bold text-gray-900">
-                          ${booking.price.toFixed(2)}
+                          {formatCurrency(booking.price, parseCurrencyCode(booking.currency))}
                         </p>
-                        {booking.payment && (
+                        {booking.payment ? (
                           <p
                             className={`text-xs mt-1 ${
                               booking.payment.status === 'PAID'
@@ -324,9 +371,24 @@ export default async function LessonsPage({
                           >
                             Payment: {booking.payment.status}
                           </p>
-                        )}
+                        ) : booking.status === 'PENDING' && session.user.role === 'PARENT' ? (
+                          <p className="text-xs mt-1 text-yellow-600">
+                            Payment pending
+                          </p>
+                        ) : null}
                       </div>
                       <div className="flex gap-2">
+                        {session.user.role === 'PARENT' && 
+                         booking.status === 'PENDING' && 
+                         (!booking.payment || booking.payment.status === 'PENDING') && (
+                          <Link
+                            href={`/bookings/${booking.id}/payment`}
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center gap-2"
+                          >
+                            <CreditCard className="h-4 w-4" />
+                            Pay Now
+                          </Link>
+                        )}
                         {canJoin && (
                           <Link
                             href={`/lessons/${booking.id}`}

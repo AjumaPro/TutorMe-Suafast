@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import Navbar from '@/components/Navbar'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import AssignmentsList from '@/components/AssignmentsList'
 
 export default async function AssignmentsPage() {
@@ -15,46 +15,85 @@ export default async function AssignmentsPage() {
   let assignments: any[] = []
 
   if (session.user.role === 'PARENT') {
-    assignments = await prisma.assignment.findMany({
-      where: { studentId: session.user.id },
-      include: {
-        booking: {
-          include: {
-            tutor: {
-              include: {
-                user: {
-                  select: {
-                    name: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    })
+    const { data: assignmentsData } = await supabase
+      .from('assignments')
+      .select('*')
+      .eq('studentId', session.user.id)
+      .order('createdAt', { ascending: false })
+    
+    assignments = assignmentsData || []
+    
+    // Fetch related booking and tutor data
+    for (const assignment of assignments) {
+      if (assignment.bookingId) {
+        const { data: booking } = await supabase
+          .from('bookings')
+          .select('*')
+          .eq('id', assignment.bookingId)
+          .single()
+        
+        if (booking) {
+          assignment.booking = booking
+          if (booking.tutorId) {
+            const { data: tutor } = await supabase
+              .from('tutor_profiles')
+              .select('*')
+              .eq('id', booking.tutorId)
+              .single()
+            
+            if (tutor) {
+              assignment.booking.tutor = tutor
+              if (tutor.userId) {
+                const { data: tutorUser } = await supabase
+                  .from('users')
+                  .select('name')
+                  .eq('id', tutor.userId)
+                  .single()
+                assignment.booking.tutor.user = tutorUser || null
+              }
+            }
+          }
+        }
+      }
+    }
   } else if (session.user.role === 'TUTOR') {
-    const tutorProfile = await prisma.tutorProfile.findUnique({
-      where: { userId: session.user.id },
-    })
+    const { data: tutorProfile } = await supabase
+      .from('tutor_profiles')
+      .select('*')
+      .eq('userId', session.user.id)
+      .single()
 
     if (tutorProfile) {
-      assignments = await prisma.assignment.findMany({
-        where: { tutorId: tutorProfile.id },
-        include: {
-          booking: {
-            include: {
-              student: {
-                select: {
-                  name: true,
-                },
-              },
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-      })
+      const { data: assignmentsData } = await supabase
+        .from('assignments')
+        .select('*')
+        .eq('tutorId', tutorProfile.id)
+        .order('createdAt', { ascending: false })
+      
+      assignments = assignmentsData || []
+      
+      // Fetch related booking and student data
+      for (const assignment of assignments) {
+        if (assignment.bookingId) {
+          const { data: booking } = await supabase
+            .from('bookings')
+            .select('*')
+            .eq('id', assignment.bookingId)
+            .single()
+          
+          if (booking) {
+            assignment.booking = booking
+            if (booking.studentId) {
+              const { data: student } = await supabase
+                .from('users')
+                .select('name')
+                .eq('id', booking.studentId)
+                .single()
+              assignment.booking.student = student || null
+            }
+          }
+        }
+      }
     }
   }
 

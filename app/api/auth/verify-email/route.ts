@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import crypto from 'crypto'
 
 export async function POST(request: Request) {
@@ -15,9 +15,11 @@ export async function POST(request: Request) {
       )
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-    })
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', session.user.id)
+      .single()
 
     if (!user) {
       return NextResponse.json(
@@ -35,17 +37,18 @@ export async function POST(request: Request) {
 
     // Generate verification token
     const verificationToken = crypto.randomBytes(32).toString('hex')
-    const verificationTokenExpiry = new Date(Date.now() + 24 * 3600000) // 24 hours
+    const verificationTokenExpiry = new Date(Date.now() + 24 * 3600000).toISOString() // 24 hours
 
     // Store verification token (you would add this field to User model)
     // For now, we'll use resetToken field as a placeholder
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
+    await supabase
+      .from('users')
+      .update({
         resetToken: verificationToken, // Reusing resetToken field for verification
         resetTokenExpiry: verificationTokenExpiry,
-      },
-    })
+        updatedAt: new Date().toISOString(),
+      })
+      .eq('id', user.id)
 
     // In production, send verification email
     if (process.env.NODE_ENV === 'development') {
@@ -81,13 +84,17 @@ export async function GET(request: Request) {
     }
 
     // Find user by verification token
-    const user = await prisma.user.findFirst({
-      where: {
-        resetToken: token, // Reusing resetToken field
-        resetTokenExpiry: {
-          gt: new Date(),
-        },
-      },
+    const { data: users } = await supabase
+      .from('users')
+      .select('*')
+      .eq('resetToken', token)
+    
+    const user = users && users.length > 0 && users.find(u => {
+      if (!u.resetTokenExpiry) return false
+      const expiry = typeof u.resetTokenExpiry === 'string' 
+        ? new Date(u.resetTokenExpiry) 
+        : u.resetTokenExpiry
+      return expiry > new Date()
     })
 
     if (!user) {
@@ -98,14 +105,15 @@ export async function GET(request: Request) {
     }
 
     // Verify email
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        emailVerified: new Date(),
+    await supabase
+      .from('users')
+      .update({
+        emailVerified: new Date().toISOString(),
         resetToken: null,
         resetTokenExpiry: null,
-      },
-    })
+        updatedAt: new Date().toISOString(),
+      })
+      .eq('id', user.id)
 
     return NextResponse.json(
       {

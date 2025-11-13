@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
 import { createNotification } from '@/lib/notifications'
+import { parseCurrencyCode, DEFAULT_CURRENCY } from '@/lib/currency'
+import crypto from 'crypto'
+
+function uuidv4() {
+  return crypto.randomUUID()
+}
 
 const recurringBookingSchema = z.object({
   tutorId: z.string(),
@@ -33,16 +39,33 @@ export async function POST(request: Request) {
     const validatedData = recurringBookingSchema.parse(body)
 
     // Verify tutor exists and is approved
-    const tutor = await prisma.tutorProfile.findUnique({
-      where: { id: validatedData.tutorId },
-      include: { user: true },
-    })
+    const { data: tutorProfile } = await supabase
+      .from('tutor_profiles')
+      .select('*')
+      .eq('id', validatedData.tutorId)
+      .single()
 
-    if (!tutor || !tutor.isApproved) {
+    if (!tutorProfile || !tutorProfile.isApproved) {
       return NextResponse.json(
         { error: 'Tutor not found or not approved' },
         { status: 404 }
       )
+    }
+
+    // Fetch tutor user data
+    let tutorUser = null
+    if (tutorProfile.userId) {
+      const { data: userData } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', tutorProfile.userId)
+        .single()
+      tutorUser = userData
+    }
+
+    const tutor = {
+      ...tutorProfile,
+      user: tutorUser,
     }
 
     const startDate = new Date(validatedData.startDate)
@@ -69,27 +92,41 @@ export async function POST(request: Request) {
         break
     }
 
+    // Get currency from tutor profile (default to GHS)
+    const currency = parseCurrencyCode(tutorProfile.currency || DEFAULT_CURRENCY)
+    const now = new Date().toISOString()
+
     // Create parent booking
-    const parentBooking = await prisma.booking.create({
-      data: {
+    const parentBookingId = uuidv4()
+    const { data: parentBooking, error: parentError } = await supabase
+      .from('bookings')
+      .insert({
+        id: parentBookingId,
         studentId: session.user.id,
         tutorId: validatedData.tutorId,
         subject: validatedData.subject,
         lessonType: validatedData.lessonType,
-        scheduledAt: startDate,
+        scheduledAt: startDate.toISOString(),
         duration: validatedData.duration,
         price: validatedData.price,
+        currency: currency,
         addressId: validatedData.addressId,
         notes: validatedData.notes,
         status: 'PENDING',
         isRecurring: true,
         recurringPattern: validatedData.recurringPattern,
-        recurringEndDate: endDate,
-      },
-    })
+        recurringEndDate: endDate.toISOString(),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .select()
+      .single()
+
+    if (parentError) throw parentError
 
     // Create child bookings
     const bookings = [parentBooking]
+    const childBookingsData: any[] = []
     const currentDate = new Date(startDate)
 
     for (let i = 1; i < occurrences; i++) {
@@ -107,26 +144,38 @@ export async function POST(request: Request) {
           break
       }
 
-      const childBooking = await prisma.booking.create({
-        data: {
-          studentId: session.user.id,
-          tutorId: validatedData.tutorId,
-          subject: validatedData.subject,
-          lessonType: validatedData.lessonType,
-          scheduledAt: nextDate,
-          duration: validatedData.duration,
-          price: validatedData.price,
-          addressId: validatedData.addressId,
-          notes: validatedData.notes,
-          status: 'PENDING',
-          isRecurring: true,
-          recurringPattern: validatedData.recurringPattern,
-          parentBookingId: parentBooking.id,
-        },
+      childBookingsData.push({
+        id: uuidv4(),
+        studentId: session.user.id,
+        tutorId: validatedData.tutorId,
+        subject: validatedData.subject,
+        lessonType: validatedData.lessonType,
+        scheduledAt: nextDate.toISOString(),
+        duration: validatedData.duration,
+        price: validatedData.price,
+        currency: currency,
+        addressId: validatedData.addressId,
+        notes: validatedData.notes,
+        status: 'PENDING',
+        isRecurring: true,
+        recurringPattern: validatedData.recurringPattern,
+        parentBookingId: parentBookingId,
+        createdAt: now,
+        updatedAt: now,
       })
 
-      bookings.push(childBooking)
       currentDate.setTime(nextDate.getTime())
+    }
+
+    // Insert all child bookings at once
+    if (childBookingsData.length > 0) {
+      const { data: childBookings, error: childError } = await supabase
+        .from('bookings')
+        .insert(childBookingsData)
+        .select()
+
+      if (childError) throw childError
+      bookings.push(...(childBookings || []))
     }
 
     // Create notifications
@@ -138,13 +187,15 @@ export async function POST(request: Request) {
       link: `/bookings/${parentBooking.id}`,
     })
 
-    await createNotification({
-      userId: tutor.userId,
-      type: 'BOOKING_CREATED',
-      title: 'New Recurring Bookings',
-      message: `${session.user.name} has booked ${occurrences} recurring lessons`,
-      link: `/lessons`,
-    })
+    if (tutorUser?.id) {
+      await createNotification({
+        userId: tutorUser.id,
+        type: 'BOOKING_CREATED',
+        title: 'New Recurring Bookings',
+        message: `${session.user.name} has booked ${occurrences} recurring lessons`,
+        link: `/lessons`,
+      })
+    }
 
     return NextResponse.json(
       {

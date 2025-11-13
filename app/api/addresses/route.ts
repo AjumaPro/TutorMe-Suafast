@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
+import crypto from 'crypto'
+
+function uuidv4() {
+  return crypto.randomUUID()
+}
 
 const addressSchema = z.object({
   street: z.string().min(1, 'Street is required'),
@@ -11,6 +16,8 @@ const addressSchema = z.object({
   zipCode: z.string().min(1, 'Zip code is required'),
   country: z.string().default('USA'),
   isDefault: z.boolean().default(false),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
 })
 
 export async function POST(request: Request) {
@@ -29,24 +36,44 @@ export async function POST(request: Request) {
 
     // If this is set as default, unset other defaults
     if (validatedData.isDefault) {
-      await prisma.address.updateMany({
-        where: { userId: session.user.id },
-        data: { isDefault: false },
-      })
+      await supabase
+        .from('addresses')
+        .update({ isDefault: false, updatedAt: new Date().toISOString() })
+        .eq('userId', session.user.id)
     }
 
     // Create address
-    const address = await prisma.address.create({
-      data: {
-        userId: session.user.id,
-        street: validatedData.street,
-        city: validatedData.city,
-        state: validatedData.state,
-        zipCode: validatedData.zipCode,
-        country: validatedData.country,
-        isDefault: validatedData.isDefault,
-      },
-    })
+    const addressId = uuidv4()
+    const now = new Date().toISOString()
+    
+    const addressData: any = {
+      id: addressId,
+      userId: session.user.id,
+      street: validatedData.street,
+      city: validatedData.city,
+      state: validatedData.state,
+      zipCode: validatedData.zipCode,
+      country: validatedData.country,
+      isDefault: validatedData.isDefault,
+      createdAt: now,
+      updatedAt: now,
+    }
+    
+    // Add coordinates if provided
+    if (validatedData.latitude !== undefined) {
+      addressData.latitude = validatedData.latitude
+    }
+    if (validatedData.longitude !== undefined) {
+      addressData.longitude = validatedData.longitude
+    }
+    
+    const { data: address, error: addressError } = await supabase
+      .from('addresses')
+      .insert(addressData)
+      .select()
+      .single()
+    
+    if (addressError) throw addressError
 
     return NextResponse.json(
       { message: 'Address created successfully', address },
@@ -78,13 +105,14 @@ export async function GET(request: Request) {
       )
     }
 
-    const addresses = await prisma.address.findMany({
-      where: { userId: session.user.id },
-      orderBy: [
-        { isDefault: 'desc' },
-        { createdAt: 'desc' },
-      ],
-    })
+    const { data: addressesData } = await supabase
+      .from('addresses')
+      .select('*')
+      .eq('userId', session.user.id)
+      .order('isDefault', { ascending: false })
+      .order('createdAt', { ascending: false })
+    
+    const addresses = addressesData || []
 
     return NextResponse.json({ addresses })
   } catch (error) {

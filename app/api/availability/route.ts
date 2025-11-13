@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
+import crypto from 'crypto'
+
+function uuidv4() {
+  return crypto.randomUUID()
+}
 
 const availabilitySchema = z.object({
   dayOfWeek: z.number().min(0).max(6),
@@ -32,9 +37,11 @@ export async function POST(request: Request) {
     if (body.slots && Array.isArray(body.slots)) {
       const validatedData = bulkAvailabilitySchema.parse(body)
       
-      const tutorProfile = await prisma.tutorProfile.findUnique({
-        where: { userId: session.user.id },
-      })
+      const { data: tutorProfile } = await supabase
+        .from('tutor_profiles')
+        .select('*')
+        .eq('userId', session.user.id)
+        .single()
 
       if (!tutorProfile) {
         return NextResponse.json(
@@ -44,20 +51,30 @@ export async function POST(request: Request) {
       }
 
       // Delete existing slots
-      await prisma.availabilitySlot.deleteMany({
-        where: { tutorId: tutorProfile.id },
-      })
+      await supabase
+        .from('availability_slots')
+        .delete()
+        .eq('tutorId', tutorProfile.id)
 
       // Create new slots
-      const slots = await prisma.availabilitySlot.createMany({
-        data: validatedData.slots.map((slot) => ({
-          tutorId: tutorProfile.id,
-          dayOfWeek: slot.dayOfWeek,
-          startTime: slot.startTime,
-          endTime: slot.endTime,
-          isAvailable: slot.isAvailable,
-        })),
-      })
+      const now = new Date().toISOString()
+      const slotsData = validatedData.slots.map((slot) => ({
+        id: uuidv4(),
+        tutorId: tutorProfile.id,
+        dayOfWeek: slot.dayOfWeek,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        isAvailable: slot.isAvailable,
+        createdAt: now,
+        updatedAt: now,
+      }))
+
+      const { data: slots, error: slotsError } = await supabase
+        .from('availability_slots')
+        .insert(slotsData)
+        .select()
+
+      if (slotsError) throw slotsError
 
       return NextResponse.json(
         { message: 'Availability updated successfully', slots },
@@ -67,9 +84,11 @@ export async function POST(request: Request) {
       // Single slot
       const validatedData = availabilitySchema.parse(body)
       
-      const tutorProfile = await prisma.tutorProfile.findUnique({
-        where: { userId: session.user.id },
-      })
+      const { data: tutorProfile } = await supabase
+        .from('tutor_profiles')
+        .select('*')
+        .eq('userId', session.user.id)
+        .single()
 
       if (!tutorProfile) {
         return NextResponse.json(
@@ -78,15 +97,23 @@ export async function POST(request: Request) {
         )
       }
 
-      const slot = await prisma.availabilitySlot.create({
-        data: {
+      const now = new Date().toISOString()
+      const { data: slot, error: slotError } = await supabase
+        .from('availability_slots')
+        .insert({
+          id: uuidv4(),
           tutorId: tutorProfile.id,
           dayOfWeek: validatedData.dayOfWeek,
           startTime: validatedData.startTime,
           endTime: validatedData.endTime,
           isAvailable: validatedData.isAvailable,
-        },
-      })
+          createdAt: now,
+          updatedAt: now,
+        })
+        .select()
+        .single()
+
+      if (slotError) throw slotError
 
       return NextResponse.json(
         { message: 'Availability slot created successfully', slot },
@@ -118,10 +145,11 @@ export async function GET(request: Request) {
 
     if (tutorId) {
       // Public access to tutor availability - verify tutor exists and is approved
-      const tutorProfile = await prisma.tutorProfile.findUnique({
-        where: { id: tutorId },
-        select: { id: true, isApproved: true },
-      })
+      const { data: tutorProfile } = await supabase
+        .from('tutor_profiles')
+        .select('id, isApproved')
+        .eq('id', tutorId)
+        .single()
       
       if (!tutorProfile) {
         return NextResponse.json(
@@ -140,9 +168,11 @@ export async function GET(request: Request) {
       targetTutorId = tutorProfile.id
     } else if (session?.user.role === 'TUTOR') {
       // Tutor viewing their own availability
-      const tutorProfile = await prisma.tutorProfile.findUnique({
-        where: { userId: session.user.id },
-      })
+      const { data: tutorProfile } = await supabase
+        .from('tutor_profiles')
+        .select('id')
+        .eq('userId', session.user.id)
+        .single()
       targetTutorId = tutorProfile?.id || null
     } else {
       return NextResponse.json(
@@ -158,13 +188,12 @@ export async function GET(request: Request) {
       )
     }
 
-    const slots = await prisma.availabilitySlot.findMany({
-      where: { tutorId: targetTutorId },
-      orderBy: [
-        { dayOfWeek: 'asc' },
-        { startTime: 'asc' },
-      ],
-    })
+    const { data: slots } = await supabase
+      .from('availability_slots')
+      .select('*')
+      .eq('tutorId', targetTutorId)
+      .order('dayOfWeek', { ascending: true })
+      .order('startTime', { ascending: true })
 
     return NextResponse.json({ slots })
   } catch (error) {

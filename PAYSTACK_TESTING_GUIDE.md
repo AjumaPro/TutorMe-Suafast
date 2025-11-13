@@ -1,232 +1,178 @@
-# Paystack Testing Guide
+# Paystack Payment Testing Guide
 
-## ✅ You're Ready to Test!
+## Prerequisites
 
-Since you have test keys in your `.env` file, you can start testing payments immediately.
+1. **Paystack Test Account**: Sign up at https://paystack.com (use test mode)
+2. **Environment Variables**: Ensure these are set in `.env.local`:
+   ```env
+   PAYSTACK_SECRET_KEY=sk_test_xxxxxxxxxxxxx  # Your Paystack test secret key
+   NEXTAUTH_URL=http://localhost:3000
+   ```
 
----
+## Test Cards (Paystack Test Mode)
 
-## 🧪 Quick Test Steps
+### ✅ Successful Payment Cards
 
-### 1. **Verify Your Environment Variables**
+**Card Number**: `4084084084084081`
+- **CVV**: Any 3 digits (e.g., `408`)
+- **Expiry**: Any future date (e.g., `12/25`)
+- **PIN**: Any 4 digits (e.g., `0000`)
+- **OTP**: `123456` (when prompted)
 
-Make sure your `.env` file has:
+**Alternative Card**: `5060666666666666666`
+- **CVV**: Any 3 digits
+- **Expiry**: Any future date
+- **PIN**: Any 4 digits
+- **OTP**: `123456`
+
+### ❌ Failed Payment Cards
+
+**Card Number**: `5060666666666666667`
+- This card will always fail
+- Use to test error handling
+
+### 💳 Bank Account (for Bank Transfer)
+
+**Account Number**: `0000000000`
+- **Bank**: Any bank
+- **Account Name**: Any name
+
+## Testing Steps
+
+### 1. Create a Test Booking
+
+1. Log in as a parent/student
+2. Go to `/search` and find a tutor
+3. Click "Book Lesson" on a tutor
+4. Fill in the booking form:
+   - Select subject
+   - Choose date and time
+   - Select duration
+   - Enter any notes (optional)
+5. Click "Book Lesson"
+6. You should be redirected to `/bookings/{bookingId}/payment`
+
+### 2. Test Payment Initialization
+
+1. On the payment page, you should see:
+   - Booking details
+   - Total amount
+   - "Pay with Paystack" button
+2. Check browser console for:
+   - `Initializing payment for booking: {bookingId}`
+   - `Payment initialization response: {...}`
+   - `✅ Payment initialized successfully`
+
+### 3. Test Payment Flow
+
+1. Click "Pay with Paystack"
+2. You should be redirected to Paystack checkout page
+3. Use test card details:
+   - **Card Number**: `4084084084084081`
+   - **CVV**: `408`
+   - **Expiry**: `12/25` (any future date)
+   - **Name**: Any name
+4. Click "Pay"
+5. Enter PIN: `0000` (any 4 digits)
+6. Enter OTP: `123456` (when prompted)
+7. Payment should be successful
+
+### 4. Verify Payment
+
+After successful payment:
+1. You should be redirected back to `/bookings/{bookingId}?payment=success`
+2. Check the booking status - should be `CONFIRMED`
+3. Check payment status - should be `PAID`
+4. You should see a success message
+
+### 5. Test Payment Verification
+
+The payment is verified in two ways:
+
+#### A. Callback Verification (Automatic)
+- After payment, Paystack redirects to callback URL
+- The callback URL triggers payment verification
+- Check browser console for verification logs
+
+#### B. Manual Verification
+You can manually verify a payment by calling:
 ```bash
-PAYSTACK_SECRET_KEY=sk_test_...  # Your test secret key
-NEXTAUTH_URL=http://localhost:3000  # Your local URL
+curl -X POST http://localhost:3000/api/payments/verify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reference": "TUTORME_xxxxx_xxxxx",
+    "bookingId": "booking-id-here"
+  }'
 ```
 
-**Note**: The public key (`NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY`) is not required for server-side operations, but you can add it if you plan to use Paystack's inline popup method.
+### 6. Test Webhook (Optional)
 
----
+To test webhooks locally, use a tool like:
+- **ngrok**: `ngrok http 3000`
+- **Paystack Webhook Testing**: Use Paystack dashboard webhook tester
 
-### 2. **Test Payment Flow**
+1. Get your webhook URL: `https://your-ngrok-url.ngrok.io/api/payments/webhook`
+2. Add it to Paystack Dashboard → Settings → API Keys & Webhooks
+3. Test webhook from Paystack dashboard
 
-1. **Create a Booking**:
-   - Sign in as a parent/student
-   - Book a lesson with a tutor
-   - You'll be redirected to the payment page
+## Common Issues & Solutions
 
-2. **Go to Payment Page**:
-   - URL: `/bookings/[booking-id]/payment`
-   - You should see the payment form with booking details
+### Issue 1: "PAYSTACK_SECRET_KEY is not set"
+**Solution**: Add `PAYSTACK_SECRET_KEY` to `.env.local`
 
-3. **Click "Pay" Button**:
-   - You'll be redirected to Paystack's test checkout page
+### Issue 2: "Payment initialization failed"
+**Check**:
+- Paystack secret key is correct
+- Booking exists and is in PENDING status
+- Currency column exists in database (run migration if needed)
 
-4. **Use Test Card**:
-   ```
-   Card Number: 4084084084084081
-   CVV: Any 3 digits (e.g., 123)
-   Expiry: Any future date (e.g., 12/25)
-   PIN: Any 4 digits (e.g., 0000)
-   ```
+### Issue 3: "Invalid payment URL"
+**Solution**: Check that Paystack returned `authorization_url` in response
 
-5. **Complete Payment**:
-   - After successful payment, you'll be redirected back
-   - Booking status should update to "CONFIRMED"
+### Issue 4: Payment succeeds but booking not updated
+**Check**:
+- Webhook is configured correctly
+- Payment verification route is working
+- Check database for payment status
 
----
+## Testing Checklist
 
-## 🎯 Paystack Test Cards (Ghana - GHS)
-
-### Successful Payment
-```
-Card Number: 4084084084084081
-CVV: Any 3 digits
-Expiry: Any future date
-PIN: Any 4 digits
-```
-
-### Declined Payment
-```
-Card Number: 5060666666666666666
-CVV: Any 3 digits
-Expiry: Any future date
-PIN: Any 4 digits
-```
-
-### Insufficient Funds
-```
-Card Number: 5060666666666666667
-CVV: Any 3 digits
-Expiry: Any future date
-PIN: Any 4 digits
-```
-
----
-
-## 📱 Test Mobile Money (Ghana)
-
-For mobile money testing:
-- **MTN**: Use any phone number starting with `024`
-- **Vodafone**: Use any phone number starting with `020`
-- **AirtelTigo**: Use any phone number starting with `027`
-
----
-
-## ⚠️ Important Notes for Testing
-
-### Webhook is Optional for Testing
-
-You don't need to configure webhooks for testing. The payment flow will work, but:
-
-- ✅ Payment will redirect successfully
-- ✅ You can manually verify payment using the verify endpoint
-- ⚠️ Booking status won't auto-update (you can manually verify)
-
-**To manually verify a payment after testing:**
-1. Get the payment reference from the Paystack checkout page
-2. The system will automatically verify when you return to the booking page
-3. Or use the verify endpoint: `POST /api/payments/verify`
-
-### Callback URL
-
-The callback URL is automatically set to:
-```
-http://localhost:3000/bookings/[booking-id]?payment=success
-```
-
-Make sure `NEXTAUTH_URL` is set to `http://localhost:3000` in your `.env`.
-
----
-
-## 🔍 Troubleshooting
-
-### Payment Initialization Fails
-
-**Check:**
-1. Is `PAYSTACK_SECRET_KEY` set correctly in `.env`?
-2. Does it start with `sk_test_`?
-3. Restart your dev server after changing `.env`
-
-**Error Messages:**
-- "No response from Paystack" → Check your secret key
-- "Invalid response" → Check Paystack dashboard for account status
-- "Unauthorized" → Verify the secret key is correct
-
-### Payment Redirect Not Working
-
-**Check:**
-1. Browser popup blocker (should allow redirects)
-2. Check browser console for errors (F12)
-3. Verify `NEXTAUTH_URL` is set correctly
-
-### Payment Succeeds but Booking Not Updated
-
-**This is normal without webhooks!** 
-
-**Solutions:**
-1. **Manual Verification**: The system will verify when you visit the booking page
-2. **Set up Webhook** (optional for testing):
-   - Use a tool like [ngrok](https://ngrok.com) to expose localhost
-   - Add webhook URL in Paystack dashboard: `https://your-ngrok-url.ngrok.io/api/payments/webhook`
-
----
-
-## 🧪 Testing Checklist
-
-- [ ] Payment page loads correctly
-- [ ] Payment initialization succeeds (check browser console)
+- [ ] Payment initialization works
 - [ ] Redirect to Paystack checkout works
-- [ ] Test card payment completes successfully
-- [ ] Redirect back to app works
-- [ ] Payment verification works (booking status updates)
-- [ ] Payment record shows "PAID" status
-- [ ] Booking status updates to "CONFIRMED"
+- [ ] Test card payment succeeds
+- [ ] Payment callback works
+- [ ] Booking status updates to CONFIRMED
+- [ ] Payment status updates to PAID
+- [ ] Success notification is created
+- [ ] Video session is created (for online lessons)
+- [ ] Error handling works (test with failing card)
+- [ ] Webhook receives events (if configured)
 
----
+## Debugging
 
-## 📊 What to Check After Payment
+### Enable Debug Logging
 
-1. **Database**:
-   - Check `payments` table - status should be "PAID"
-   - Check `bookings` table - status should be "CONFIRMED"
-   - Verify `paystackReference` and `paystackPaymentId` are set
+Check server console for:
+- `Initializing Paystack transaction with options: {...}`
+- `Paystack response: {...}`
+- `Payment initialization error: {...}`
 
-2. **Paystack Dashboard**:
-   - Go to Paystack Dashboard → Transactions
-   - You should see the test transaction
-   - Check transaction details match your booking
+### Check Database
 
-3. **App**:
-   - Booking should show as "CONFIRMED"
-   - Payment should show as "PAID"
-   - For online lessons, video session should be created
+Query payments table:
+```sql
+SELECT * FROM payments WHERE bookingId = 'your-booking-id';
+```
 
----
+Query bookings table:
+```sql
+SELECT * FROM bookings WHERE id = 'your-booking-id';
+```
 
-## 🚀 Next Steps
+## Next Steps
 
-Once testing works:
-
-1. **For Production**:
-   - Switch to live keys (`sk_live_...`)
-   - Configure production webhook URL
-   - Update `NEXTAUTH_URL` to production domain
-
-2. **Optional Enhancements**:
-   - Add logo URL (`NEXT_PUBLIC_PAYSTACK_LOGO_URL`)
-   - Configure split payments (`PAYSTACK_SPLIT_CODE`)
-   - Customize payment channels in `lib/paystack-config.ts`
-
----
-
-## 💡 Pro Tips
-
-1. **Check Server Logs**: Watch your terminal for Paystack API responses
-2. **Browser Console**: Check for any client-side errors
-3. **Paystack Dashboard**: Monitor transactions in real-time
-4. **Test Different Scenarios**: Try declined cards, insufficient funds, etc.
-
----
-
-## 🆘 Need Help?
-
-If payments aren't working:
-
-1. **Check Environment Variables**:
-   ```bash
-   # In your terminal
-   echo $PAYSTACK_SECRET_KEY  # Should show your test key
-   ```
-
-2. **Check Server Logs**: Look for Paystack API errors
-
-3. **Verify Paystack Account**: 
-   - Log into Paystack dashboard
-   - Check that test mode is enabled
-   - Verify API keys are active
-
-4. **Test API Directly**:
-   ```bash
-   curl https://api.paystack.co/transaction/initialize \
-     -H "Authorization: Bearer sk_test_YOUR_KEY" \
-     -H "Content-Type: application/json" \
-     -d '{"email":"test@example.com","amount":10000}'
-   ```
-
----
-
-**You're all set! Start testing your payment flow now! 🎉**
-
+1. Test with real Paystack account (production mode)
+2. Configure webhook URL in production
+3. Set up split payments if needed
+4. Test mobile money payments (Ghana)
+5. Test bank transfer payments

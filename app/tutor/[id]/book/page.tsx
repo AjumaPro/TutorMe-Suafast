@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import Navbar from '@/components/Navbar'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import BookingForm from '@/components/BookingForm'
 
 export default async function BookTutorPage({
@@ -17,25 +17,39 @@ export default async function BookTutorPage({
   }
 
   const { id } = await params
-  const tutor = await prisma.tutorProfile.findUnique({
-    where: { id },
-    include: {
-      user: {
-        select: {
-          name: true,
-          email: true,
-        },
-      },
-    },
-  })
+  
+  // Fetch tutor profile
+  const { data: tutorProfile } = await supabase
+    .from('tutor_profiles')
+    .select('*')
+    .eq('id', id)
+    .single()
 
-  if (!tutor || !tutor.isApproved) {
+  if (!tutorProfile || !tutorProfile.isApproved) {
     redirect('/search')
   }
 
-  const studentAddresses = await prisma.address.findMany({
-    where: { userId: session.user.id },
-  })
+  // Fetch tutor user data
+  let tutorUser = null
+  if (tutorProfile.userId) {
+    const { data: userData } = await supabase
+      .from('users')
+      .select('name, email')
+      .eq('id', tutorProfile.userId)
+      .single()
+    tutorUser = userData
+  }
+
+  const tutor = {
+    ...tutorProfile,
+    user: tutorUser,
+  }
+
+  // Fetch student addresses
+  const { data: studentAddresses } = await supabase
+    .from('addresses')
+    .select('*')
+    .eq('userId', session.user.id)
 
   return (
     <div className="min-h-screen bg-gray-50">

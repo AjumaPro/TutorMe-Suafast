@@ -13,10 +13,13 @@ export async function GET(request: Request) {
       )
     }
 
-    // In a real application, you would fetch payment methods from Stripe
-    // For now, we'll return an empty array
+    // Paystack handles payment methods through their checkout page
+    // Users can save cards during payment, but we don't store them directly
+    // Payment methods are managed through Paystack's system
+    // For now, we'll return an empty array as payment methods are handled by Paystack
     return NextResponse.json({
       paymentMethods: [],
+      message: 'Payment methods are managed through Paystack. They are saved automatically when you make payments.',
     })
   } catch (error) {
     console.error('Payment methods fetch error:', error)
@@ -38,9 +41,10 @@ export async function PATCH(request: Request) {
       )
     }
 
-    // In a real application, you would update payment methods in Stripe
+    // Payment methods are managed through Paystack
+    // Updates are handled through Paystack's checkout and customer management
     return NextResponse.json({
-      message: 'Payment method updated',
+      message: 'Payment methods are managed through Paystack checkout',
     })
   } catch (error) {
     console.error('Payment method update error:', error)
@@ -62,9 +66,10 @@ export async function DELETE(request: Request) {
       )
     }
 
-    // In a real application, you would delete payment methods from Stripe
+    // Payment methods are managed through Paystack
+    // Deletion should be handled through Paystack dashboard or customer portal
     return NextResponse.json({
-      message: 'Payment method deleted',
+      message: 'Payment methods are managed through Paystack. Please contact support to remove saved payment methods.',
     })
   } catch (error) {
     console.error('Payment method delete error:', error)

@@ -2,7 +2,8 @@ import { redirect } from 'next/navigation'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import Navbar from '@/components/Navbar'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
+import { formatCurrency, parseCurrencyCode } from '@/lib/currency'
 import { Calendar, Clock, MapPin, Video, User, CheckCircle, XCircle } from 'lucide-react'
 import Link from 'next/link'
 import TutoringSchedule from '@/components/TutoringSchedule'
@@ -18,43 +19,110 @@ export default async function SchedulePage() {
   let bookings: any[] = []
   let tutorProfile = null
 
-  if (session.user.role === 'PARENT') {
-    bookings = await prisma.booking.findMany({
-      where: {
-        studentId: session.user.id,
-      },
-      include: {
-        tutor: {
-          include: {
-            user: true,
-          },
-        },
-      },
-      orderBy: {
-        scheduledAt: 'asc',
-      },
-    })
+  if (session.user.role === 'ADMIN') {
+    // Admin sees all bookings in the system
+    const { data: bookingsData } = await supabase
+      .from('bookings')
+      .select('*')
+      .order('scheduledAt', { ascending: true })
+    
+    bookings = bookingsData || []
+    
+    // Fetch related tutor, student, and user data
+    for (const booking of bookings) {
+      // Fetch tutor data
+      if (booking.tutorId) {
+        const { data: tutor } = await supabase
+          .from('tutor_profiles')
+          .select('*')
+          .eq('id', booking.tutorId)
+          .single()
+        
+        if (tutor) {
+          booking.tutor = tutor
+          if (tutor.userId) {
+            const { data: tutorUser } = await supabase
+              .from('users')
+              .select('name, email, image')
+              .eq('id', tutor.userId)
+              .single()
+            booking.tutor.user = tutorUser || null
+          }
+        }
+      }
+      
+      // Fetch student data
+      if (booking.studentId) {
+        const { data: student } = await supabase
+          .from('users')
+          .select('name, email, image')
+          .eq('id', booking.studentId)
+          .single()
+        booking.student = student || null
+      }
+    }
+  } else if (session.user.role === 'PARENT') {
+    const { data: bookingsData } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('studentId', session.user.id)
+      .order('scheduledAt', { ascending: true })
+    
+    bookings = bookingsData || []
+    
+    // Fetch related tutor and user data
+    for (const booking of bookings) {
+      if (booking.tutorId) {
+        const { data: tutor } = await supabase
+          .from('tutor_profiles')
+          .select('*')
+          .eq('id', booking.tutorId)
+          .single()
+        
+        if (tutor) {
+          booking.tutor = tutor
+          if (tutor.userId) {
+            const { data: tutorUser } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', tutor.userId)
+              .single()
+            booking.tutor.user = tutorUser || null
+          }
+        }
+      }
+    }
   } else if (session.user.role === 'TUTOR') {
-    tutorProfile = await prisma.tutorProfile.findUnique({
-      where: { userId: session.user.id },
-    })
+    const { data: tutorProfileData } = await supabase
+      .from('tutor_profiles')
+      .select('*')
+      .eq('userId', session.user.id)
+      .single()
+    
+    tutorProfile = tutorProfileData || null
 
-    bookings = await prisma.booking.findMany({
-      where: {
-        tutorId: tutorProfile?.id || '',
-      },
-      include: {
-        student: {
-          select: {
-            name: true,
-            email: true,
-          },
-        },
-      },
-      orderBy: {
-        scheduledAt: 'asc',
-      },
-    })
+    if (tutorProfile?.id) {
+      // Fetch all bookings for this tutor (both student-booked and admin-assigned)
+      const { data: bookingsData } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('tutorId', tutorProfile.id)
+        .order('scheduledAt', { ascending: true })
+      
+      bookings = bookingsData || []
+      
+      // Fetch related student data
+      for (const booking of bookings) {
+        if (booking.studentId) {
+          const { data: student } = await supabase
+            .from('users')
+            .select('name, email, image')
+            .eq('id', booking.studentId)
+            .single()
+          booking.student = student || null
+        }
+      }
+    }
   }
 
   // Group bookings by date
@@ -117,7 +185,9 @@ export default async function SchedulePage() {
             {/* Upcoming Lessons List */}
             <div className="bg-white rounded-xl shadow-md p-6">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold text-gray-800">Upcoming Lessons</h2>
+                <h2 className="text-xl font-semibold text-gray-800">
+                  {session.user.role === 'ADMIN' ? 'All Bookings' : 'Upcoming Lessons'}
+                </h2>
                 {session.user.role === 'PARENT' ? (
                   <Link
                     href="/search"
@@ -125,11 +195,19 @@ export default async function SchedulePage() {
                   >
                     + New Booking
                   </Link>
+                ) : session.user.role === 'ADMIN' ? (
+                  <Link
+                    href="/admin?tab=tutors"
+                    className="px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors text-sm font-medium inline-block"
+                    title="Schedule a lesson from the admin panel"
+                  >
+                    Schedule Lesson
+                  </Link>
                 ) : (
                   <button
                     disabled
                     className="px-4 py-2 bg-gray-300 text-gray-500 rounded-lg cursor-not-allowed text-sm font-medium"
-                    title="Students book lessons with you"
+                    title="Students book lessons with you or admin assigns them"
                   >
                     + New Booking
                   </button>
@@ -141,9 +219,11 @@ export default async function SchedulePage() {
                   <Calendar className="h-16 w-16 text-gray-300 mx-auto mb-4" />
                   <p className="text-gray-500 text-lg mb-2">No scheduled lessons</p>
                   <p className="text-gray-400 text-sm">
-                    {session.user.role === 'PARENT'
+                    {session.user.role === 'ADMIN'
+                      ? 'No bookings in the system yet'
+                      : session.user.role === 'PARENT'
                       ? 'Start by searching for a tutor'
-                      : 'Your bookings will appear here'}
+                      : 'Your bookings (from students and admin assignments) will appear here'}
                   </p>
                   {session.user.role === 'PARENT' && (
                     <Link
@@ -151,6 +231,14 @@ export default async function SchedulePage() {
                       className="inline-block mt-4 px-6 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors"
                     >
                       Find a Tutor
+                    </Link>
+                  )}
+                  {session.user.role === 'ADMIN' && (
+                    <Link
+                      href="/admin?tab=tutors"
+                      className="inline-block mt-4 px-6 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors"
+                    >
+                      Schedule a Lesson
                     </Link>
                   )}
                 </div>
@@ -187,9 +275,20 @@ export default async function SchedulePage() {
                               <div className="flex-1">
                                 <div className="flex items-center gap-2 mb-2">
                                   <h4 className="font-semibold text-gray-800">
-                                    {session.user.role === 'PARENT'
-                                      ? booking.tutor.user.name
-                                      : booking.student.name}
+                                    {session.user.role === 'ADMIN' ? (
+                                      <>
+                                        <span className="flex items-center gap-2">
+                                          <User className="h-4 w-4 text-gray-500" />
+                                          {booking.student?.name || 'Unknown Student'}
+                                        </span>
+                                        <span className="text-gray-400 mx-2">with</span>
+                                        <span>{booking.tutor?.user?.name || 'Unknown Tutor'}</span>
+                                      </>
+                                    ) : session.user.role === 'PARENT' ? (
+                                      booking.tutor?.user?.name || 'Unknown Tutor'
+                                    ) : (
+                                      booking.student?.name || 'Unknown Student'
+                                    )}
                                   </h4>
                                   <span
                                     className={`px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 ${getStatusColor(
@@ -219,12 +318,34 @@ export default async function SchedulePage() {
                                     )}
                                     {booking.lessonType === 'ONLINE' ? 'Online' : 'In-Person'}
                                   </div>
+                                  {session.user.role === 'ADMIN' && booking.tutor?.user?.email && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-xs text-gray-400">
+                                        Tutor: {booking.tutor.user.email}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {session.user.role === 'ADMIN' && booking.student?.email && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-xs text-gray-400">
+                                        Student: {booking.student.email}
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                               <div className="text-right">
                                 <p className="font-bold text-lg text-gray-900">
-                                  ${booking.price.toFixed(2)}
+                                  {formatCurrency(booking.price, parseCurrencyCode(booking.currency))}
                                 </p>
+                                {session.user.role === 'ADMIN' && (
+                                  <Link
+                                    href={`/lessons/${booking.id}`}
+                                    className="text-xs text-pink-600 hover:text-pink-700 mt-1 inline-block"
+                                  >
+                                    View Details
+                                  </Link>
+                                )}
                               </div>
                             </div>
                             {booking.status === 'CONFIRMED' && booking.lessonType === 'ONLINE' && (
@@ -250,7 +371,9 @@ export default async function SchedulePage() {
           <div className="space-y-6">
             {/* Quick Stats */}
             <div className="bg-white rounded-xl shadow-md p-6">
-              <h3 className="font-semibold text-gray-800 mb-4">This Week</h3>
+              <h3 className="font-semibold text-gray-800 mb-4">
+                {session.user.role === 'ADMIN' ? 'System Overview' : 'This Week'}
+              </h3>
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <span className="text-gray-600">Scheduled</span>
@@ -265,6 +388,12 @@ export default async function SchedulePage() {
                     {bookings.filter((b) => b.status === 'COMPLETED').length}
                   </span>
                 </div>
+                {session.user.role === 'ADMIN' && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Total Bookings</span>
+                    <span className="font-bold text-gray-900">{bookings.length}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="text-gray-600">Total Hours</span>
                   <span className="font-bold text-gray-900">
@@ -276,6 +405,14 @@ export default async function SchedulePage() {
                     h
                   </span>
                 </div>
+                {session.user.role === 'TUTOR' && (
+                  <div className="pt-4 border-t">
+                    <p className="text-xs text-gray-500 mb-2">Your Students:</p>
+                    <p className="font-semibold text-gray-800">
+                      {new Set(bookings.map((b) => b.studentId).filter(Boolean)).size}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
 
 const reassignSchema = z.object({
@@ -33,9 +33,11 @@ export async function PATCH(
     const validatedData = reassignSchema.parse(body)
 
     // Get the booking
-    const booking = await prisma.booking.findUnique({
-      where: { id },
-    })
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', id)
+      .single()
 
     if (!booking) {
       return NextResponse.json(
@@ -46,9 +48,11 @@ export async function PATCH(
 
     // Verify new tutor if provided
     if (validatedData.tutorId) {
-      const tutor = await prisma.tutorProfile.findUnique({
-        where: { id: validatedData.tutorId },
-      })
+      const { data: tutor } = await supabase
+        .from('tutor_profiles')
+        .select('*')
+        .eq('id', validatedData.tutorId)
+        .single()
 
       if (!tutor || !tutor.isApproved) {
         return NextResponse.json(
@@ -60,9 +64,11 @@ export async function PATCH(
 
     // Verify new student if provided
     if (validatedData.studentId) {
-      const student = await prisma.user.findUnique({
-        where: { id: validatedData.studentId },
-      })
+      const { data: student } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', validatedData.studentId)
+        .single()
 
       if (!student || student.role !== 'PARENT') {
         return NextResponse.json(
@@ -73,39 +79,69 @@ export async function PATCH(
     }
 
     // Update booking
-    const updateData: any = {}
+    const updateData: any = {
+      updatedAt: new Date().toISOString(),
+    }
     if (validatedData.tutorId) updateData.tutorId = validatedData.tutorId
     if (validatedData.studentId) updateData.studentId = validatedData.studentId
     if (validatedData.subject) updateData.subject = validatedData.subject
-    if (validatedData.scheduledAt) updateData.scheduledAt = new Date(validatedData.scheduledAt)
+    if (validatedData.scheduledAt) updateData.scheduledAt = new Date(validatedData.scheduledAt).toISOString()
     if (validatedData.duration) updateData.duration = validatedData.duration
     if (validatedData.price) updateData.price = validatedData.price
     updateData.notes = booking.notes
       ? `${booking.notes} | Reassigned by administrator`
       : 'Reassigned by administrator'
 
-    const updatedBooking = await prisma.booking.update({
-      where: { id },
-      data: updateData,
-      include: {
-        student: {
-          select: {
-            name: true,
-            email: true,
-          },
-        },
-        tutor: {
-          include: {
-            user: {
-              select: {
-                name: true,
-                email: true,
-              },
-            },
-          },
-        },
-      },
-    })
+    const { data: updatedBookingData } = await supabase
+      .from('bookings')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (!updatedBookingData) {
+      return NextResponse.json(
+        { error: 'Failed to update booking' },
+        { status: 500 }
+      )
+    }
+
+    // Fetch related data
+    let student = null
+    if (updatedBookingData.studentId) {
+      const { data: studentData } = await supabase
+        .from('users')
+        .select('name, email')
+        .eq('id', updatedBookingData.studentId)
+        .single()
+      student = studentData
+    }
+
+    let tutor = null
+    let tutorUser = null
+    if (updatedBookingData.tutorId) {
+      const { data: tutorData } = await supabase
+        .from('tutor_profiles')
+        .select('*')
+        .eq('id', updatedBookingData.tutorId)
+        .single()
+      tutor = tutorData
+
+      if (tutor?.userId) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('name, email')
+          .eq('id', tutor.userId)
+          .single()
+        tutorUser = userData
+      }
+    }
+
+    const updatedBooking = {
+      ...updatedBookingData,
+      student,
+      tutor: tutor ? { ...tutor, user: tutorUser } : null,
+    }
 
     return NextResponse.json({
       message: 'Class reassigned successfully',

@@ -1,15 +1,20 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { randomBytes } from 'crypto'
 import { z } from 'zod'
+import crypto from 'crypto'
+
+function uuidv4() {
+  return crypto.randomUUID()
+}
 
 const startSessionSchema = z.object({
   subject: z.string().optional(),
 })
 
-// Start a live session (for tutors)
+// Start a live session (for tutors only)
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions)
@@ -32,9 +37,11 @@ export async function POST(request: Request) {
     const { subject } = startSessionSchema.parse(body)
 
     // Get tutor profile
-    const tutorProfile = await prisma.tutorProfile.findUnique({
-      where: { userId: session.user.id },
-    })
+    const { data: tutorProfile } = await supabase
+      .from('tutor_profiles')
+      .select('id, isApproved')
+      .eq('userId', session.user.id)
+      .single()
 
     if (!tutorProfile || !tutorProfile.isApproved) {
       return NextResponse.json(
@@ -45,16 +52,32 @@ export async function POST(request: Request) {
 
     // Generate unique session token
     const sessionToken = randomBytes(32).toString('hex')
+    const now = new Date().toISOString()
+    const sessionId = uuidv4()
 
     // Create new live session
-    const videoSession = await prisma.videoSession.create({
-      data: {
+    const { data: videoSession, error: createError } = await supabase
+      .from('video_sessions')
+      .insert({
+        id: sessionId,
         tutorId: tutorProfile.id,
         sessionToken,
         status: 'ACTIVE',
         subject: subject || null,
-      },
-    })
+        startedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .select()
+      .single()
+
+    if (createError) {
+      console.error('Error creating live session:', createError)
+      return NextResponse.json(
+        { error: 'Failed to create live session' },
+        { status: 500 }
+      )
+    }
 
     // Generate join link
     const joinLink = `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/join/${sessionToken}`
@@ -79,4 +102,3 @@ export async function POST(request: Request) {
     )
   }
 }
-

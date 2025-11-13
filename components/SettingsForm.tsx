@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Save } from 'lucide-react'
+import { Save, CheckCircle, XCircle } from 'lucide-react'
 import { useSession } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
 
 export default function SettingsForm() {
-  const { data: session } = useSession()
+  const { data: session, update: updateSession } = useSession()
+  const router = useRouter()
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -14,6 +16,9 @@ export default function SettingsForm() {
     hourlyRate: 0,
   })
   const [loading, setLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
 
   useEffect(() => {
     fetchUserData()
@@ -34,42 +39,64 @@ export default function SettingsForm() {
       }
     } catch (err) {
       console.error('Failed to fetch user data:', err)
+      setError('Failed to load profile data')
     } finally {
       setLoading(false)
     }
   }
-  const [isSaving, setIsSaving] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSaving(true)
+    setError('')
+    setSuccess(false)
 
     try {
       const response = await fetch('/api/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: 'profile',
           name: formData.name,
           email: formData.email,
-          phone: formData.phone,
-          bio: formData.bio,
-          hourlyRate: formData.hourlyRate,
+          phone: formData.phone || null,
+          ...(session?.user.role === 'TUTOR' && {
+            bio: formData.bio,
+            hourlyRate: formData.hourlyRate,
+          }),
         }),
       })
 
       const result = await response.json()
 
       if (!response.ok) {
-        alert(result.error || 'Failed to save settings')
+        setError(result.error || result.details?.[0]?.message || 'Failed to save settings')
         return
       }
 
-      alert('Settings saved successfully!')
-      window.location.reload()
+      setSuccess(true)
+      
+      // Update session with new user data
+      if (updateSession) {
+        await updateSession({
+          ...session,
+          user: {
+            ...session?.user,
+            name: formData.name,
+            email: formData.email,
+          },
+        })
+      }
+
+      // Refresh the page data
+      router.refresh()
+      
+      // Clear success message after 3 seconds
+      setTimeout(() => {
+        setSuccess(false)
+      }, 3000)
     } catch (err) {
       console.error('Error saving settings:', err)
-      alert('An error occurred. Please try again.')
+      setError('An error occurred. Please try again.')
     } finally {
       setIsSaving(false)
     }
@@ -86,6 +113,24 @@ export default function SettingsForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      {error && (
+        <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded-lg">
+          <div className="flex items-center">
+            <XCircle className="h-5 w-5 text-red-400 mr-2" />
+            <p className="text-sm font-medium text-red-800">{error}</p>
+          </div>
+        </div>
+      )}
+
+      {success && (
+        <div className="bg-green-50 border-l-4 border-green-400 p-4 rounded-lg">
+          <div className="flex items-center">
+            <CheckCircle className="h-5 w-5 text-green-400 mr-2" />
+            <p className="text-sm font-medium text-green-800">Profile updated successfully!</p>
+          </div>
+        </div>
+      )}
+
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
         <input
@@ -94,6 +139,7 @@ export default function SettingsForm() {
           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
           required
+          disabled={isSaving}
         />
       </div>
 
@@ -105,6 +151,7 @@ export default function SettingsForm() {
           onChange={(e) => setFormData({ ...formData, email: e.target.value })}
           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
           required
+          disabled={isSaving}
         />
       </div>
 
@@ -112,9 +159,10 @@ export default function SettingsForm() {
         <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
         <input
           type="tel"
-          value={formData.phone}
+          value={formData.phone || ''}
           onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+          disabled={isSaving}
         />
       </div>
 
@@ -128,6 +176,7 @@ export default function SettingsForm() {
               rows={4}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
               placeholder="Tell us about yourself..."
+              disabled={isSaving}
             />
           </div>
 
@@ -135,7 +184,7 @@ export default function SettingsForm() {
             <label className="block text-sm font-medium text-gray-700 mb-2">Hourly Rate</label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">
-                $
+                ₵
               </span>
               <input
                 type="number"
@@ -146,6 +195,7 @@ export default function SettingsForm() {
                 className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
                 min="0"
                 step="0.01"
+                disabled={isSaving}
               />
             </div>
           </div>
@@ -155,14 +205,20 @@ export default function SettingsForm() {
       <div className="flex justify-end gap-3">
         <button
           type="button"
-          className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+          onClick={() => {
+            setError('')
+            setSuccess(false)
+            fetchUserData()
+          }}
+          className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+          disabled={isSaving}
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={isSaving}
-          className="px-6 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+          className="px-6 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Save className="h-4 w-4" />
           {isSaving ? 'Saving...' : 'Save Changes'}

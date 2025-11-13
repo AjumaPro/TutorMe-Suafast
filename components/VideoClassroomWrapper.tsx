@@ -53,24 +53,33 @@ export default function VideoClassroomWrapper({ booking, userRole, sessionToken:
             const data = await response.json()
             setSessionToken(data.sessionToken)
           } else if (response.status === 404) {
-            // Session doesn't exist, try to create it
-            const createResponse = await fetch('/api/video/session', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              credentials: 'include',
-              body: JSON.stringify({ bookingId: booking.id }),
-            })
+            // Session doesn't exist
+            // Only tutors can create sessions
+            if (userRole === 'TUTOR') {
+              // Try to create it
+              const createResponse = await fetch('/api/video/session', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                credentials: 'include',
+                body: JSON.stringify({ bookingId: booking.id }),
+              })
 
-            if (createResponse.ok) {
-              const createData = await createResponse.json()
-              setSessionToken(createData.sessionToken)
+              if (createResponse.ok) {
+                const createData = await createResponse.json()
+                setSessionToken(createData.sessionToken)
+              } else {
+                const errorData = await createResponse.json()
+                setError(errorData.error || 'Failed to create video session. Only tutors can start sessions.')
+              }
             } else {
-              setError('Failed to create video session')
+              // Students must wait for tutor to start the session
+              setError('Video session has not been started yet. Please wait for the tutor to start the session.')
             }
           } else {
-            setError('Failed to get video session')
+            const errorData = await response.json().catch(() => ({}))
+            setError(errorData.error || 'Failed to get video session')
           }
         } catch (err) {
           console.error('Error fetching session token:', err)

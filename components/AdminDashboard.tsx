@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Users, CheckCircle, XCircle, DollarSign, BookOpen } from 'lucide-react'
+import { formatCurrency, parseCurrencyCode } from '@/lib/currency'
 
 export default function AdminDashboard({ stats, pendingTutors }: any) {
   const router = useRouter()
@@ -106,7 +107,7 @@ export default function AdminDashboard({ stats, pendingTutors }: any) {
                       ))}
                     </div>
                     <div className="mt-3 text-sm text-gray-600">
-                      <span className="font-medium">Rate:</span> ${tutor.hourlyRate}/hour
+                      <span className="font-medium">Rate:</span> {formatCurrency(tutor.hourlyRate, parseCurrencyCode(tutor.currency))}/hour
                       {tutor.experience && (
                         <>
                           {' • '}

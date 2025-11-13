@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 
 // End a live session
 export async function POST(
@@ -21,16 +21,11 @@ export async function POST(
     const { token } = await params
 
     // Get video session
-    const videoSession = await prisma.videoSession.findUnique({
-      where: { sessionToken: token },
-      include: {
-        tutor: {
-          include: {
-            user: true,
-          },
-        },
-      },
-    })
+    const { data: videoSession } = await supabase
+      .from('video_sessions')
+      .select('*')
+      .eq('sessionToken', token)
+      .single()
 
     if (!videoSession) {
       return NextResponse.json(
@@ -41,9 +36,11 @@ export async function POST(
 
     // Check authorization - only tutor who started it can end it
     if (videoSession.tutorId) {
-      const tutorProfile = await prisma.tutorProfile.findUnique({
-        where: { userId: session.user.id },
-      })
+      const { data: tutorProfile } = await supabase
+        .from('tutor_profiles')
+        .select('id')
+        .eq('userId', session.user.id)
+        .single()
 
       if (!tutorProfile || tutorProfile.id !== videoSession.tutorId) {
         return NextResponse.json(
@@ -53,16 +50,11 @@ export async function POST(
       }
     } else if (videoSession.bookingId) {
       // For booking-based sessions, check if user is authorized
-      const booking = await prisma.booking.findUnique({
-        where: { id: videoSession.bookingId },
-        include: {
-          tutor: {
-            include: {
-              user: true,
-            },
-          },
-        },
-      })
+      const { data: booking } = await supabase
+        .from('bookings')
+        .select('studentId, tutorId')
+        .eq('id', videoSession.bookingId)
+        .single()
 
       if (!booking) {
         return NextResponse.json(
@@ -71,9 +63,21 @@ export async function POST(
         )
       }
 
+      // Fetch tutor to check userId
+      let tutorUserId = null
+      if (booking.tutorId) {
+        const { data: tutor } = await supabase
+          .from('tutor_profiles')
+          .select('userId')
+          .eq('id', booking.tutorId)
+          .single()
+
+        tutorUserId = tutor?.userId
+      }
+
       const isAuthorized =
         booking.studentId === session.user.id ||
-        booking.tutor.userId === session.user.id ||
+        (tutorUserId === session.user.id) ||
         session.user.role === 'ADMIN'
 
       if (!isAuthorized) {
@@ -85,13 +89,23 @@ export async function POST(
     }
 
     // Update session status
-    await prisma.videoSession.update({
-      where: { sessionToken: token },
-      data: {
+    const now = new Date().toISOString()
+    const { error: updateError } = await supabase
+      .from('video_sessions')
+      .update({
         status: 'ENDED',
-        endedAt: new Date(),
-      },
-    })
+        endedAt: now,
+        updatedAt: now,
+      })
+      .eq('sessionToken', token)
+
+    if (updateError) {
+      console.error('Error updating video session:', updateError)
+      return NextResponse.json(
+        { error: 'Failed to end session' },
+        { status: 500 }
+      )
+    }
 
     return NextResponse.json({
       message: 'Video session ended successfully',
@@ -104,4 +118,3 @@ export async function POST(
     )
   }
 }
-

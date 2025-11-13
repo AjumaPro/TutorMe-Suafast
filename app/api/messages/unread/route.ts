@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 
 export async function GET(request: Request) {
   try {
@@ -25,13 +25,12 @@ export async function GET(request: Request) {
     }
 
     // Count unread messages from this recipient
-    const count = await prisma.message.count({
-      where: {
-        senderId: recipientId,
-        recipientId: session.user.id,
-        isRead: false,
-      },
-    })
+    const { count } = await supabase
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('senderId', recipientId)
+      .eq('recipientId', session.user.id)
+      .eq('isRead', false)
 
     return NextResponse.json({ count })
   } catch (error) {

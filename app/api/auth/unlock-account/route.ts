@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
 
 const unlockAccountSchema = z.object({
@@ -18,9 +18,11 @@ export async function POST(request: Request) {
 
     const email = validatedData.email.toLowerCase().trim()
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-    })
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .single()
 
     if (!user) {
       // Don't reveal if user exists
@@ -32,13 +34,14 @@ export async function POST(request: Request) {
 
     // Check if user is trying to unlock their own account or is admin
     if (session && (session.user.email === email || session.user.role === 'ADMIN')) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
+      await supabase
+        .from('users')
+        .update({
           accountLockedUntil: null,
           failedLoginAttempts: 0,
-        },
-      })
+          updatedAt: new Date().toISOString(),
+        })
+        .eq('id', user.id)
 
       return NextResponse.json(
         { message: 'Account unlocked successfully' },

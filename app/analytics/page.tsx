@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import Navbar from '@/components/Navbar'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { TrendingUp, TrendingDown, Users, BookOpen, DollarSign, Clock, Star, Target, ArrowUpRight, ArrowDownRight } from 'lucide-react'
 import RecentActivity from '@/components/RecentActivity'
 import Link from 'next/link'
@@ -42,15 +42,31 @@ export default async function AnalyticsPage() {
   const previousMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0)
 
   if (session.user.role === 'TUTOR') {
-    tutorProfile = await prisma.tutorProfile.findUnique({
-      where: { userId: session.user.id },
-    })
+    const { data: tutorProfileData } = await supabase
+      .from('tutor_profiles')
+      .select('*')
+      .eq('userId', session.user.id)
+      .single()
+    
+    tutorProfile = tutorProfileData || null
 
     if (tutorProfile) {
-      const allBookings = await prisma.booking.findMany({
-        where: { tutorId: tutorProfile.id },
-        include: { payment: true },
-      })
+      const { data: bookingsData } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('tutorId', tutorProfile.id)
+      
+      const allBookings = bookingsData || []
+      
+      // Fetch payments for bookings
+      for (const booking of allBookings) {
+        const { data: payment } = await supabase
+          .from('payments')
+          .select('*')
+          .eq('bookingId', booking.id)
+          .single()
+        booking.payment = payment || null
+      }
 
       const currentPeriodBookings = allBookings.filter(
         (b) => new Date(b.createdAt) >= currentMonthStart
@@ -94,10 +110,22 @@ export default async function AnalyticsPage() {
       stats.totalStudents = uniqueStudents.size
     }
   } else if (session.user.role === 'PARENT') {
-    const allBookings = await prisma.booking.findMany({
-      where: { studentId: session.user.id },
-      include: { payment: true },
-    })
+    const { data: bookingsData } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('studentId', session.user.id)
+    
+    const allBookings = bookingsData || []
+    
+    // Fetch payments for bookings
+    for (const booking of allBookings) {
+      const { data: payment } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('bookingId', booking.id)
+        .single()
+      booking.payment = payment || null
+    }
 
     const currentPeriodBookings = allBookings.filter(
       (b) => new Date(b.createdAt) >= currentMonthStart
@@ -173,27 +201,43 @@ export default async function AnalyticsPage() {
 
     let monthBookings: any[] = []
     if (session.user.role === 'TUTOR' && tutorProfile) {
-      monthBookings = await prisma.booking.findMany({
-        where: {
-          tutorId: tutorProfile.id,
-          scheduledAt: {
-            gte: monthStart,
-            lte: monthEnd,
-          },
-        },
-        include: { payment: true },
-      })
+      const { data: bookingsData } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('tutorId', tutorProfile.id)
+        .gte('scheduledAt', monthStart.toISOString())
+        .lte('scheduledAt', monthEnd.toISOString())
+      
+      monthBookings = bookingsData || []
+      
+      // Fetch payments
+      for (const booking of monthBookings) {
+        const { data: payment } = await supabase
+          .from('payments')
+          .select('*')
+          .eq('bookingId', booking.id)
+          .single()
+        booking.payment = payment || null
+      }
     } else if (session.user.role === 'PARENT') {
-      monthBookings = await prisma.booking.findMany({
-        where: {
-          studentId: session.user.id,
-          scheduledAt: {
-            gte: monthStart,
-            lte: monthEnd,
-          },
-        },
-        include: { payment: true },
-      })
+      const { data: bookingsData } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('studentId', session.user.id)
+        .gte('scheduledAt', monthStart.toISOString())
+        .lte('scheduledAt', monthEnd.toISOString())
+      
+      monthBookings = bookingsData || []
+      
+      // Fetch payments
+      for (const booking of monthBookings) {
+        const { data: payment } = await supabase
+          .from('payments')
+          .select('*')
+          .eq('bookingId', booking.id)
+          .single()
+        booking.payment = payment || null
+      }
     }
 
     const bookings = monthBookings.length
@@ -226,32 +270,96 @@ export default async function AnalyticsPage() {
   let reviews: any[] = []
 
   if (session.user.role === 'TUTOR' && tutorProfile) {
-    allBookings = await prisma.booking.findMany({
-      where: { tutorId: tutorProfile.id },
-      include: { payment: true, student: { select: { name: true } } },
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-    })
+    const { data: bookingsData } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('tutorId', tutorProfile.id)
+      .order('createdAt', { ascending: false })
+      .limit(10)
+    
+    allBookings = bookingsData || []
+    
+    // Fetch payments and student data
+    for (const booking of allBookings) {
+      const { data: payment } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('bookingId', booking.id)
+        .single()
+      booking.payment = payment || null
+      
+      if (booking.studentId) {
+        const { data: student } = await supabase
+          .from('users')
+          .select('name')
+          .eq('id', booking.studentId)
+          .single()
+        booking.student = student || null
+      }
+    }
+    
     payments = allBookings
       .filter((b) => b.payment?.status === 'PAID')
       .map((b) => b.payment)
       .filter(Boolean)
-    reviews = await prisma.review.findMany({
-      where: { tutorId: tutorProfile.id },
-      include: { student: { select: { name: true } } },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-    })
+    
+    const { data: reviewsData } = await supabase
+      .from('reviews')
+      .select('*')
+      .eq('tutorId', tutorProfile.id)
+      .order('createdAt', { ascending: false })
+      .limit(5)
+    
+    reviews = reviewsData || []
+    
+    // Fetch student data for reviews
+    for (const review of reviews) {
+      if (review.studentId) {
+        const { data: student } = await supabase
+          .from('users')
+          .select('name')
+          .eq('id', review.studentId)
+          .single()
+        review.student = student || null
+      }
+    }
   } else if (session.user.role === 'PARENT') {
-    allBookings = await prisma.booking.findMany({
-      where: { studentId: session.user.id },
-      include: {
-        payment: true,
-        tutor: { include: { user: { select: { name: true } } } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-    })
+    const { data: bookingsData } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('studentId', session.user.id)
+      .order('createdAt', { ascending: false })
+      .limit(10)
+    
+    allBookings = bookingsData || []
+    
+    // Fetch payments and tutor data
+    for (const booking of allBookings) {
+      const { data: payment } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('bookingId', booking.id)
+        .single()
+      booking.payment = payment || null
+      
+      if (booking.tutorId) {
+        const { data: tutor } = await supabase
+          .from('tutor_profiles')
+          .select('*')
+          .eq('id', booking.tutorId)
+          .single()
+        
+        if (tutor && tutor.userId) {
+          const { data: tutorUser } = await supabase
+            .from('users')
+            .select('name')
+            .eq('id', tutor.userId)
+            .single()
+          booking.tutor = { ...tutor, user: tutorUser || null }
+        }
+      }
+    }
+    
     payments = allBookings
       .filter((b) => b.payment?.status === 'PAID')
       .map((b) => b.payment)

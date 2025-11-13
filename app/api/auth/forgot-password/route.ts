@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
 import crypto from 'crypto'
 
@@ -16,25 +16,28 @@ export async function POST(request: Request) {
     const email = validatedData.email.toLowerCase().trim()
 
     // Find user
-    const user = await prisma.user.findUnique({
-      where: { email },
-    })
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .single()
 
     // Always return success to prevent email enumeration
     // In production, you would send an email here
     if (user) {
       // Generate reset token
       const resetToken = crypto.randomBytes(32).toString('hex')
-      const resetTokenExpiry = new Date(Date.now() + 3600000) // 1 hour from now
+      const resetTokenExpiry = new Date(Date.now() + 3600000).toISOString() // 1 hour from now
 
       // Store reset token in database
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
+      await supabase
+        .from('users')
+        .update({
           resetToken,
           resetTokenExpiry,
-        },
-      })
+          updatedAt: new Date().toISOString(),
+        })
+        .eq('id', user.id)
 
       // In production, send email with reset link
       // For now, log it in development

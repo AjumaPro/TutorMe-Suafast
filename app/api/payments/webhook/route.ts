@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
+import { createNotification } from '@/lib/notifications'
 import crypto from 'crypto'
 
 // Paystack initialization
@@ -38,24 +39,11 @@ export async function POST(request: Request) {
       const transaction = event.data
 
       // Find payment by reference
-      const payment = await prisma.payment.findUnique({
-        where: { paystackReference: transaction.reference },
-        include: {
-          booking: {
-            include: {
-              tutor: {
-                include: {
-                  user: {
-                    select: {
-                      id: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      })
+      const { data: payment } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('paystackReference', transaction.reference)
+        .single()
 
       if (!payment) {
         console.error('Payment not found for reference:', transaction.reference)
@@ -70,74 +58,160 @@ export async function POST(request: Request) {
         return NextResponse.json({ received: true })
       }
 
+      const now = new Date().toISOString()
+      const paidAt = transaction.paid_at ? new Date(transaction.paid_at).toISOString() : now
+
       // Update payment record
-      await prisma.payment.update({
-        where: { id: payment.id },
-        data: {
+      await supabase
+        .from('payments')
+        .update({
           paystackPaymentId: transaction.id.toString(),
           status: 'PAID',
-          paidAt: new Date(transaction.paid_at || new Date()),
-        },
-      })
+          paidAt: paidAt,
+          updatedAt: now,
+        })
+        .eq('id', payment.id)
 
-      // Update booking status
-      await prisma.booking.update({
-        where: { id: payment.bookingId },
-        data: {
-          status: 'CONFIRMED',
-        },
-      })
+      // Fetch booking
+      const { data: booking } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('id', payment.bookingId)
+        .single()
 
-      // If this is a recurring parent booking, also confirm all child bookings
-      if (payment.booking.isRecurring && !payment.booking.parentBookingId) {
-        await prisma.booking.updateMany({
-          where: { parentBookingId: payment.bookingId },
-          data: {
+      if (booking) {
+        // Fetch student
+        const { data: student } = await supabase
+          .from('users')
+          .select('id, name, email')
+          .eq('id', booking.studentId)
+          .single()
+
+        // Fetch tutor and user
+        let tutor = null
+        let tutorUser = null
+        if (booking.tutorId) {
+          const { data: tutorData } = await supabase
+            .from('tutor_profiles')
+            .select('*')
+            .eq('id', booking.tutorId)
+            .single()
+          tutor = tutorData
+          
+          if (tutor?.userId) {
+            const { data: userData } = await supabase
+              .from('users')
+              .select('id, name, email')
+              .eq('id', tutor.userId)
+              .single()
+            tutorUser = userData
+          }
+        }
+
+        // Update booking status
+        await supabase
+          .from('bookings')
+          .update({
             status: 'CONFIRMED',
-          },
-        })
-        console.log('Confirmed all child bookings for recurring booking:', payment.bookingId)
+            updatedAt: now,
+          })
+          .eq('id', payment.bookingId)
+
+        // If this is a recurring parent booking, also confirm all child bookings
+        if (booking.isRecurring && !booking.parentBookingId) {
+          await supabase
+            .from('bookings')
+            .update({
+              status: 'CONFIRMED',
+              updatedAt: now,
+            })
+            .eq('parentBookingId', booking.id)
+          console.log('Confirmed all child bookings for recurring booking:', booking.id)
+        }
+
+        // Create video session for online lessons
+        if (booking.lessonType === 'ONLINE') {
+          const { randomBytes } = await import('crypto')
+          const sessionToken = randomBytes(32).toString('hex')
+          
+          // Check if video session exists
+          const { data: existingSession } = await supabase
+            .from('video_sessions')
+            .select('*')
+            .eq('bookingId', booking.id)
+            .single()
+          
+          if (existingSession) {
+            await supabase
+              .from('video_sessions')
+              .update({
+                sessionToken,
+                status: 'ACTIVE',
+                updatedAt: now,
+              })
+              .eq('id', existingSession.id)
+          } else {
+            const sessionId = crypto.randomUUID()
+            await supabase
+              .from('video_sessions')
+              .insert({
+                id: sessionId,
+                bookingId: booking.id,
+                sessionToken,
+                status: 'ACTIVE',
+                createdAt: now,
+                updatedAt: now,
+              })
+          }
+        }
+
+        // Send notifications to both parent and tutor
+        try {
+          const scheduledAt = typeof booking.scheduledAt === 'string' 
+            ? booking.scheduledAt 
+            : new Date(booking.scheduledAt).toISOString()
+
+          // Notification for parent (student)
+          if (student) {
+            await createNotification({
+              userId: booking.studentId,
+              type: 'PAYMENT_RECEIVED',
+              title: 'Payment Successful - Booking Confirmed',
+              message: `Your payment of ₵${payment.amount.toFixed(2)} for ${booking.subject} lesson has been confirmed. Your booking is now active!`,
+              link: `/bookings/${payment.bookingId}`,
+              metadata: {
+                bookingId: payment.bookingId,
+                amount: payment.amount,
+                subject: booking.subject,
+                scheduledAt: scheduledAt,
+              },
+            })
+          }
+
+          // Notification for tutor
+          if (tutorUser) {
+            await createNotification({
+              userId: tutor.userId,
+              type: 'BOOKING_CONFIRMED',
+              title: 'New Booking Confirmed',
+              message: `${student?.name || 'A student'} has confirmed and paid for a ${booking.subject} lesson scheduled for ${new Date(scheduledAt).toLocaleDateString()} at ${new Date(scheduledAt).toLocaleTimeString()}.`,
+              link: `/bookings/${payment.bookingId}`,
+              metadata: {
+                bookingId: payment.bookingId,
+                studentName: student?.name || 'Unknown',
+                subject: booking.subject,
+                scheduledAt: scheduledAt,
+                amount: payment.amount,
+              },
+            })
+          }
+
+          console.log(`✅ Notifications sent to parent (${student?.email || 'N/A'}) and tutor (${tutorUser?.email || 'N/A'})`)
+        } catch (notificationError) {
+          console.error('Error sending notifications:', notificationError)
+          // Don't fail the webhook if notifications fail
+        }
       }
-
-      // Create video session for online lessons
-      if (payment.booking.lessonType === 'ONLINE') {
-        const { randomBytes } = await import('crypto')
-        const sessionToken = randomBytes(32).toString('hex')
-
-        await prisma.videoSession.upsert({
-          where: { bookingId: payment.bookingId },
-          create: {
-            bookingId: payment.bookingId,
-            sessionToken,
-            status: 'ACTIVE',
-          },
-          update: {
-            status: 'ACTIVE',
-          },
-        })
-      }
-
-      // Create notification for student
-      await prisma.notification.create({
-        data: {
-          userId: payment.booking.studentId,
-          type: 'PAYMENT_RECEIVED',
-          title: 'Payment Successful',
-          message: `Your payment of ₵${payment.amount.toFixed(2)} for ${payment.booking.subject} lesson has been confirmed.`,
-          link: `/bookings/${payment.bookingId}`,
-        },
-      })
-
-      // Create notification for tutor
-      await prisma.notification.create({
-        data: {
-          userId: payment.booking.tutor.userId,
-          type: 'BOOKING_CONFIRMED',
-          title: 'New Booking Confirmed',
-          message: `A new ${payment.booking.subject} lesson has been booked and paid for.`,
-          link: `/tutor/bookings/${payment.bookingId}`,
-        },
-      })
 
       return NextResponse.json({ received: true })
     }
@@ -146,17 +220,20 @@ export async function POST(request: Request) {
     if (event.event === 'charge.failed') {
       const transaction = event.data
 
-      const payment = await prisma.payment.findUnique({
-        where: { paystackReference: transaction.reference },
-      })
+      const { data: payment } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('paystackReference', transaction.reference)
+        .single()
 
       if (payment && payment.status === 'PENDING') {
-        await prisma.payment.update({
-          where: { id: payment.id },
-          data: {
+        await supabase
+          .from('payments')
+          .update({
             status: 'FAILED',
-          },
-        })
+            updatedAt: new Date().toISOString(),
+          })
+          .eq('id', payment.id)
       }
 
       return NextResponse.json({ received: true })

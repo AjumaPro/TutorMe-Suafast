@@ -1,14 +1,16 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { useSession, signOut } from 'next-auth/react'
-import { Home, BarChart3, Calendar, MessageSquare, Settings, Search, Bell, BookOpen, LogOut, Users } from 'lucide-react'
+import { Home, BarChart3, Calendar, MessageSquare, Settings, Search, Bell, BookOpen, LogOut, Users, Menu, X } from 'lucide-react'
 import NotificationsBell from './NotificationsBell'
 import { usePathname } from 'next/navigation'
 
 export default function Navbar() {
   const { data: session } = useSession()
   const pathname = usePathname()
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
   const navItems = [
     { href: '/dashboard', label: 'Home', icon: Home },
@@ -20,70 +22,144 @@ export default function Navbar() {
   ]
 
   return (
-    <nav className="bg-white shadow-sm border-b border-gray-200">
+    <nav className="bg-white shadow-sm border-b border-gray-200 relative z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          <Link href="/" className="flex items-center">
-            <img 
-              src="/logo.png" 
-              alt="Suafast" 
-              className="h-8 w-auto"
-            />
-          </Link>
+          <div className="flex items-center gap-4">
+            {/* Mobile menu button */}
+            {session && (
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="md:hidden p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+                aria-label="Toggle menu"
+              >
+                {isMobileMenuOpen ? (
+                  <X className="h-6 w-6" />
+                ) : (
+                  <Menu className="h-6 w-6" />
+                )}
+              </button>
+            )}
+            <Link href="/" className="flex items-center" onClick={() => setIsMobileMenuOpen(false)}>
+              <img 
+                src="/logo.png" 
+                alt="Suafast" 
+                className="h-8 w-auto"
+              />
+            </Link>
+          </div>
           
           {session ? (
-            <div className="flex items-center gap-6">
-              <div className="hidden md:flex items-center gap-1">
-                {navItems.map((item) => {
-                  const Icon = item.icon
-                  const isActive = pathname === item.href
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={`flex items-center gap-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                        isActive
-                          ? 'text-pink-600 bg-pink-50'
-                          : 'text-gray-700 hover:text-pink-600 hover:bg-gray-50'
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      <span>{item.label}</span>
-                    </Link>
-                  )
-                })}
-              </div>
-              
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <Search className="h-5 w-5 text-gray-400" />
+            <>
+              {/* Desktop Navigation */}
+              <div className="hidden md:flex items-center gap-6">
+                <div className="flex items-center gap-1">
+                  {navItems.map((item) => {
+                    const Icon = item.icon
+                    const isActive = pathname === item.href
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={`flex items-center gap-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                          isActive
+                            ? 'text-pink-600 bg-pink-50'
+                            : 'text-gray-700 hover:text-pink-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Icon className="h-4 w-4" />
+                        <span>{item.label}</span>
+                      </Link>
+                    )
+                  })}
                 </div>
-                <NotificationsBell />
-                <div className="flex items-center gap-2 pl-3 border-l border-gray-200">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-sm font-bold">
-                    {session.user.name?.charAt(0).toUpperCase() || 'U'}
+                
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <Search className="h-5 w-5 text-gray-400" />
                   </div>
-                  <button
-                    onClick={() => signOut()}
-                    className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
-                    title="Sign Out"
-                  >
-                    <LogOut className="h-5 w-5" />
-                  </button>
+                  <NotificationsBell />
+                  <div className="flex items-center gap-2 pl-3 border-l border-gray-200">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-sm font-bold">
+                      {session.user.name?.charAt(0).toUpperCase() || 'U'}
+                    </div>
+                    <button
+                      onClick={() => signOut()}
+                      className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                      title="Sign Out"
+                    >
+                      <LogOut className="h-5 w-5" />
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
+
+              {/* Mobile Navigation */}
+              <div className="md:hidden flex items-center gap-3">
+                <NotificationsBell />
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-sm font-bold">
+                  {session.user.name?.charAt(0).toUpperCase() || 'U'}
+                </div>
+              </div>
+
+              {/* Mobile Menu Dropdown */}
+              {isMobileMenuOpen && (
+                <>
+                  {/* Backdrop */}
+                  <div
+                    className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                  />
+                  {/* Menu */}
+                  <div className="absolute top-16 left-0 right-0 bg-white border-b border-gray-200 shadow-lg z-50 md:hidden">
+                    <div className="px-4 py-2 space-y-1">
+                      {navItems.map((item) => {
+                        const Icon = item.icon
+                        const isActive = pathname === item.href
+                        return (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+                              isActive
+                                ? 'text-pink-600 bg-pink-50'
+                                : 'text-gray-700 hover:text-pink-600 hover:bg-gray-50'
+                            }`}
+                          >
+                            <Icon className="h-5 w-5" />
+                            <span>{item.label}</span>
+                          </Link>
+                        )
+                      })}
+                      <div className="border-t border-gray-200 pt-2 mt-2">
+                        <button
+                          onClick={() => {
+                            signOut()
+                            setIsMobileMenuOpen(false)
+                          }}
+                          className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 w-full"
+                        >
+                          <LogOut className="h-5 w-5" />
+                          <span>Sign Out</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </>
           ) : (
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 sm:space-x-4">
               <Link
                 href="/auth/signin"
-                className="text-gray-700 hover:text-pink-600 px-3 py-2 rounded-md text-sm font-medium"
+                className="text-gray-700 hover:text-pink-600 px-2 sm:px-3 py-2 rounded-md text-sm font-medium"
               >
                 Sign In
               </Link>
               <Link
                 href="/auth/signup"
-                className="bg-pink-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-pink-700"
+                className="bg-pink-600 text-white px-3 sm:px-4 py-2 rounded-md text-sm font-medium hover:bg-pink-700"
               >
                 Get Started
               </Link>

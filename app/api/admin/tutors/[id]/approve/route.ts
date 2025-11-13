@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
 
 const approveSchema = z.object({
@@ -26,12 +26,17 @@ export async function POST(
     const body = await request.json()
     const { approved } = approveSchema.parse(body)
 
-    const tutor = await prisma.tutorProfile.update({
-      where: { id },
-      data: {
+    const { data: tutor, error: updateError } = await supabase
+      .from('tutor_profiles')
+      .update({
         isApproved: approved,
-      },
-    })
+        updatedAt: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (updateError) throw updateError
 
     return NextResponse.json(
       { message: `Tutor ${approved ? 'approved' : 'rejected'} successfully`, tutor },

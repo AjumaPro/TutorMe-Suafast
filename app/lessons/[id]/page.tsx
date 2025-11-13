@@ -4,7 +4,8 @@ import Link from 'next/link'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import Navbar from '@/components/Navbar'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
+import { formatCurrency, parseCurrencyCode } from '@/lib/currency'
 import AssignmentUpload from '@/components/AssignmentUpload'
 import ProgressEntryForm from '@/components/ProgressEntryForm'
 
@@ -35,45 +36,99 @@ export default async function LessonPage({
   }
 
   const { id } = await params
-  const booking = await prisma.booking.findUnique({
-    where: { id },
-    include: {
-      tutor: {
-        include: {
-          user: {
-            select: {
-              name: true,
-              email: true,
-            },
-          },
-        },
-      },
-      student: {
-        select: {
-          name: true,
-          email: true,
-        },
-      },
-      videoSession: {
-        select: {
-          sessionToken: true,
-          status: true,
-        },
-      },
-      assignments: {
-        orderBy: { createdAt: 'desc' },
-      },
-    },
-  })
-
-  if (!booking) {
+  
+  // Fetch booking
+  const { data: bookingData } = await supabase
+    .from('bookings')
+    .select('*')
+    .eq('id', id)
+    .single()
+  
+  if (!bookingData) {
     redirect('/dashboard')
   }
+  
+  // Fetch tutor and user data
+  let tutor = null
+  let tutorUser = null
+  if (bookingData.tutorId) {
+    const { data: tutorData } = await supabase
+      .from('tutor_profiles')
+      .select('*')
+      .eq('id', bookingData.tutorId)
+      .single()
+    
+    tutor = tutorData
+    
+    if (tutor?.userId) {
+      const { data: userData } = await supabase
+        .from('users')
+        .select('name, email')
+        .eq('id', tutor.userId)
+        .single()
+      tutorUser = userData
+    }
+  }
+  
+  // Fetch student data
+  let student = null
+  let studentAddress = null
+  if (bookingData.studentId) {
+    const { data: studentData } = await supabase
+      .from('users')
+      .select('name, email, phone')
+      .eq('id', bookingData.studentId)
+      .single()
+    student = studentData
+    
+    // Fetch student address if it's an in-person lesson
+    if (bookingData.lessonType === 'IN_PERSON' && bookingData.addressId) {
+      const { data: address } = await supabase
+        .from('addresses')
+        .select('*')
+        .eq('id', bookingData.addressId)
+        .single()
+      studentAddress = address
+    }
+  }
+  
+  // Fetch video session
+  const { data: videoSession } = await supabase
+    .from('video_sessions')
+    .select('sessionToken, status')
+    .eq('bookingId', bookingData.id)
+    .single()
+  
+  // Fetch assignments
+  const { data: assignments } = await supabase
+    .from('assignments')
+    .select('*')
+    .eq('bookingId', bookingData.id)
+    .order('createdAt', { ascending: false })
+  
+  // Combine all data
+  const bookingWithRelations: any = {
+    ...bookingData,
+    tutor: tutor ? {
+      ...tutor,
+      user: tutorUser,
+    } : null,
+    student: student,
+    studentAddress: studentAddress,
+    videoSession: videoSession ? {
+      sessionToken: videoSession.sessionToken,
+      status: videoSession.status,
+    } : null,
+    assignments: assignments || [],
+  }
+  
+  // Use bookingWithRelations as the final booking object
+  const booking = bookingWithRelations
 
   // Check if user is authorized (student or tutor)
   const isAuthorized =
     booking.studentId === session.user.id ||
-    booking.tutor.userId === session.user.id
+    (tutor?.userId === session.user.id)
 
   if (!isAuthorized) {
     redirect('/dashboard')
@@ -83,7 +138,9 @@ export default async function LessonPage({
   // Users can view their own lessons regardless of status
 
   const otherPerson =
-    session.user.role === 'PARENT' ? booking.tutor.user : booking.student
+    session.user.role === 'PARENT' 
+      ? (booking.tutor?.user || { name: 'Tutor' })
+      : (booking.student || { name: 'Student' })
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -111,6 +168,28 @@ export default async function LessonPage({
               <h3 className="text-sm font-medium text-gray-500 mb-1">Tutor/Student</h3>
               <p className="text-lg font-semibold text-gray-800">{otherPerson.name}</p>
               <p className="text-sm text-gray-600">{otherPerson.email}</p>
+              {/* Show student phone and location for tutors */}
+              {session.user.role === 'TUTOR' && booking.student && (
+                <div className="mt-2 space-y-1">
+                  {booking.student.phone && (
+                    <p className="text-sm text-gray-600">
+                      <span className="font-medium">Phone:</span>{' '}
+                      <a 
+                        href={`tel:${booking.student.phone}`}
+                        className="text-blue-600 hover:text-blue-800 hover:underline"
+                      >
+                        {booking.student.phone}
+                      </a>
+                    </p>
+                  )}
+                  {booking.lessonType === 'IN_PERSON' && booking.studentAddress && (
+                    <p className="text-sm text-gray-600">
+                      <span className="font-medium">Location:</span>{' '}
+                      {booking.studentAddress.street}, {booking.studentAddress.city}, {booking.studentAddress.state} {booking.studentAddress.zipCode}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
             <div>
               <h3 className="text-sm font-medium text-gray-500 mb-1">Subject</h3>
@@ -169,7 +248,9 @@ export default async function LessonPage({
             </div>
             <div>
               <h3 className="text-sm font-medium text-gray-500 mb-1">Price</h3>
-              <p className="text-lg font-semibold text-gray-800">${booking.price.toFixed(2)}</p>
+              <p className="text-lg font-semibold text-gray-800">
+                {formatCurrency(booking.price, parseCurrencyCode(booking.currency))}
+              </p>
             </div>
           </div>
           {booking.notes && (

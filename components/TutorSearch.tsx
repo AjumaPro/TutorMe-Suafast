@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Star, MapPin, DollarSign, BookOpen } from 'lucide-react'
+import { Star, MapPin, BookOpen } from 'lucide-react'
+import { formatCurrency, parseCurrencyCode } from '@/lib/currency'
 
 const SUBJECTS = [
   'Math', 'Science', 'English', 'History', 'Foreign Languages',
@@ -200,9 +201,8 @@ export default function TutorSearch({ tutors, initialFilters }: any) {
 
                   <div className="ml-6 text-right">
                     <div className="mb-4">
-                      <div className="flex items-center text-2xl font-bold text-primary-600">
-                        <DollarSign className="h-6 w-6" />
-                        {tutor.hourlyRate}
+                      <div className="text-2xl font-bold text-primary-600">
+                        {formatCurrency(tutor.hourlyRate, parseCurrencyCode(tutor.currency))}
                       </div>
                       <span className="text-sm text-gray-500">per hour</span>
                     </div>

@@ -20,6 +20,7 @@ function VerifyEmailForm() {
       setStatus('error')
       setMessage('Invalid verification link')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
   const verifyEmail = async (verificationToken: string) => {

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
 
@@ -14,13 +14,17 @@ export async function POST(request: Request) {
     const validatedData = resetPasswordSchema.parse(body)
 
     // Find user by reset token
-    const user = await prisma.user.findFirst({
-      where: {
-        resetToken: validatedData.token,
-        resetTokenExpiry: {
-          gt: new Date(),
-        },
-      },
+    const { data: users } = await supabase
+      .from('users')
+      .select('*')
+      .eq('resetToken', validatedData.token)
+    
+    const user = users && users.length > 0 && users.find(u => {
+      if (!u.resetTokenExpiry) return false
+      const expiry = typeof u.resetTokenExpiry === 'string' 
+        ? new Date(u.resetTokenExpiry) 
+        : u.resetTokenExpiry
+      return expiry > new Date()
     })
 
     if (!user) {
@@ -42,16 +46,17 @@ export async function POST(request: Request) {
     const hashedPassword = await bcrypt.hash(validatedData.password, 10)
 
     // Update user's password and invalidate reset token
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
+    await supabase
+      .from('users')
+      .update({
         password: hashedPassword,
         resetToken: null,
         resetTokenExpiry: null,
         failedLoginAttempts: 0, // Reset failed attempts
         accountLockedUntil: null, // Unlock account if locked
-      },
-    })
+        updatedAt: new Date().toISOString(),
+      })
+      .eq('id', user.id)
 
     return NextResponse.json(
       {

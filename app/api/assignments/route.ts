@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
+import crypto from 'crypto'
+
+function uuidv4() {
+  return crypto.randomUUID()
+}
 
 const assignmentSchema = z.object({
   bookingId: z.string(),
@@ -35,13 +40,11 @@ export async function POST(request: Request) {
     const validatedData = assignmentSchema.parse(body)
 
     // Verify booking exists and belongs to student
-    const booking = await prisma.booking.findUnique({
-      where: { id: validatedData.bookingId },
-      include: {
-        tutor: { include: { user: true } },
-        student: true,
-      },
-    })
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', validatedData.bookingId)
+      .single()
 
     if (!booking) {
       return NextResponse.json(
@@ -57,8 +60,33 @@ export async function POST(request: Request) {
       )
     }
 
-    const assignment = await prisma.assignment.create({
-      data: {
+    // Fetch tutor data
+    let tutor = null
+    let tutorUser = null
+    if (booking.tutorId) {
+      const { data: tutorData } = await supabase
+        .from('tutor_profiles')
+        .select('*')
+        .eq('id', booking.tutorId)
+        .single()
+      
+      tutor = tutorData
+      
+      if (tutor?.userId) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', tutor.userId)
+          .single()
+        tutorUser = userData
+      }
+    }
+
+    const now = new Date().toISOString()
+    const { data: assignment, error: createError } = await supabase
+      .from('assignments')
+      .insert({
+        id: uuidv4(),
         bookingId: validatedData.bookingId,
         studentId: session.user.id,
         tutorId: booking.tutorId,
@@ -68,25 +96,35 @@ export async function POST(request: Request) {
         fileName: validatedData.fileName,
         fileSize: validatedData.fileSize,
         status: 'SUBMITTED',
-      },
-      include: {
-        booking: {
-          include: {
-            tutor: { include: { user: true } },
-          },
-        },
-      },
-    })
+        submittedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .select()
+      .single()
+
+    if (createError) throw createError
+
+    // Attach booking and tutor data
+    assignment.booking = {
+      ...booking,
+      tutor: tutor ? {
+        ...tutor,
+        user: tutorUser,
+      } : null,
+    }
 
     // Create notification for tutor
-    const { createNotification } = await import('@/lib/notifications')
-    await createNotification({
-      userId: booking.tutor.userId,
-      type: 'ASSIGNMENT_SUBMITTED',
-      title: 'New Assignment Submitted',
-      message: `${session.user.name} submitted an assignment: ${validatedData.title}`,
-      link: `/assignments/${assignment.id}`,
-    })
+    if (tutorUser?.id) {
+      const { createNotification } = await import('@/lib/notifications')
+      await createNotification({
+        userId: tutorUser.id,
+        type: 'ASSIGNMENT_SUBMITTED',
+        title: 'New Assignment Submitted',
+        message: `${session.user.name} submitted an assignment: ${validatedData.title}`,
+        link: `/assignments/${assignment.id}`,
+      })
+    }
 
     return NextResponse.json(
       { message: 'Assignment submitted successfully', assignment },
@@ -122,41 +160,91 @@ export async function GET(request: Request) {
     const bookingId = searchParams.get('bookingId')
     const status = searchParams.get('status')
 
-    const where: any = {}
+    let query = supabase
+      .from('assignments')
+      .select('*')
 
     if (session.user.role === 'PARENT') {
-      where.studentId = session.user.id
+      query = query.eq('studentId', session.user.id)
     } else if (session.user.role === 'TUTOR') {
-      const tutorProfile = await prisma.tutorProfile.findUnique({
-        where: { userId: session.user.id },
-      })
+      const { data: tutorProfile } = await supabase
+        .from('tutor_profiles')
+        .select('id')
+        .eq('userId', session.user.id)
+        .single()
+      
       if (tutorProfile) {
-        where.tutorId = tutorProfile.id
+        query = query.eq('tutorId', tutorProfile.id)
       } else {
         return NextResponse.json({ assignments: [] })
       }
     }
 
     if (bookingId) {
-      where.bookingId = bookingId
+      query = query.eq('bookingId', bookingId)
     }
 
     if (status) {
-      where.status = status
+      query = query.eq('status', status)
     }
 
-    const assignments = await prisma.assignment.findMany({
-      where,
-      include: {
-        booking: {
-          include: {
-            tutor: { include: { user: { select: { name: true } } } },
-            student: { select: { name: true } },
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    })
+    const { data: assignmentsData } = await query.order('createdAt', { ascending: false })
+    const assignments = assignmentsData || []
+
+    // Fetch related booking, tutor, and student data
+    for (const assignment of assignments) {
+      if (assignment.bookingId) {
+        const { data: bookingData } = await supabase
+          .from('bookings')
+          .select('*')
+          .eq('id', assignment.bookingId)
+          .single()
+        
+        if (bookingData) {
+          // Fetch tutor
+          let tutor = null
+          let tutorUser = null
+          if (bookingData.tutorId) {
+            const { data: tutorData } = await supabase
+              .from('tutor_profiles')
+              .select('*')
+              .eq('id', bookingData.tutorId)
+              .single()
+            
+            tutor = tutorData
+            
+            if (tutor?.userId) {
+              const { data: userData } = await supabase
+                .from('users')
+                .select('name')
+                .eq('id', tutor.userId)
+                .single()
+              tutorUser = userData
+            }
+          }
+
+          // Fetch student
+          let student = null
+          if (bookingData.studentId) {
+            const { data: studentData } = await supabase
+              .from('users')
+              .select('name')
+              .eq('id', bookingData.studentId)
+              .single()
+            student = studentData
+          }
+
+          assignment.booking = {
+            ...bookingData,
+            tutor: tutor ? {
+              ...tutor,
+              user: tutorUser,
+            } : null,
+            student: student,
+          }
+        }
+      }
+    }
 
     return NextResponse.json({ assignments })
   } catch (error) {
@@ -182,9 +270,11 @@ export async function PATCH(request: Request) {
     const body = await request.json()
     const validatedData = reviewAssignmentSchema.parse(body)
 
-    const tutorProfile = await prisma.tutorProfile.findUnique({
-      where: { userId: session.user.id },
-    })
+    const { data: tutorProfile } = await supabase
+      .from('tutor_profiles')
+      .select('*')
+      .eq('userId', session.user.id)
+      .single()
 
     if (!tutorProfile) {
       return NextResponse.json(
@@ -193,10 +283,11 @@ export async function PATCH(request: Request) {
       )
     }
 
-    const assignment = await prisma.assignment.findUnique({
-      where: { id: validatedData.assignmentId },
-      include: { student: true },
-    })
+    const { data: assignment } = await supabase
+      .from('assignments')
+      .select('*')
+      .eq('id', validatedData.assignmentId)
+      .single()
 
     if (!assignment) {
       return NextResponse.json(
@@ -212,15 +303,34 @@ export async function PATCH(request: Request) {
       )
     }
 
-    const updatedAssignment = await prisma.assignment.update({
-      where: { id: validatedData.assignmentId },
-      data: {
+    // Fetch student data
+    let student = null
+    if (assignment.studentId) {
+      const { data: studentData } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', assignment.studentId)
+        .single()
+      student = studentData
+    }
+
+    const { data: updatedAssignment, error: updateError } = await supabase
+      .from('assignments')
+      .update({
         feedback: validatedData.feedback,
         grade: validatedData.grade,
         status: validatedData.status,
-        reviewedAt: new Date(),
-      },
-    })
+        reviewedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .eq('id', validatedData.assignmentId)
+      .select()
+      .single()
+
+    if (updateError) throw updateError
+
+    // Attach student data
+    updatedAssignment.student = student
 
     // Create notification for student
     const { createNotification } = await import('@/lib/notifications')

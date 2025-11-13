@@ -66,6 +66,7 @@ app.prepare().then(() => {
         }
 
         const session = activeSessions.get(sessionKey)
+        // Store user role for authorization checks
         session.participants.set(socket.id, { userId, userRole, socketId: socket.id })
 
         // Notify others in the room
@@ -79,7 +80,7 @@ app.prepare().then(() => {
         const participants = Array.from(session.participants.values())
         io.to(sessionToken).emit('session-participants', participants)
 
-        console.log(`User ${userId} joined session ${sessionToken}`)
+        console.log(`User ${userId} (${userRole}) joined session ${sessionToken}`)
       } catch (error) {
         console.error('Error joining session:', error)
         socket.emit('error', { message: 'Failed to join session' })
@@ -114,8 +115,20 @@ app.prepare().then(() => {
     })
 
     // Handle participant control (tutor only)
+    // Helper function to check if requester is tutor
+    const isTutor = (sessionKey, socketId) => {
+      const session = activeSessions.get(sessionKey)
+      if (!session) return false
+      const requester = session.participants.get(socketId)
+      return requester && requester.userRole === 'TUTOR'
+    }
+
     socket.on('mute-participant-audio', ({ sessionToken, targetUserId }) => {
       const sessionKey = `session:${sessionToken}`
+      if (!isTutor(sessionKey, socket.id)) {
+        socket.emit('error', { message: 'Only tutors can control participants' })
+        return
+      }
       const session = activeSessions.get(sessionKey)
       if (session) {
         // Find target participant's socket
@@ -130,6 +143,10 @@ app.prepare().then(() => {
 
     socket.on('mute-participant-video', ({ sessionToken, targetUserId }) => {
       const sessionKey = `session:${sessionToken}`
+      if (!isTutor(sessionKey, socket.id)) {
+        socket.emit('error', { message: 'Only tutors can control participants' })
+        return
+      }
       const session = activeSessions.get(sessionKey)
       if (session) {
         const targetParticipant = Array.from(session.participants.entries()).find(
@@ -143,6 +160,10 @@ app.prepare().then(() => {
 
     socket.on('unmute-participant-audio', ({ sessionToken, targetUserId }) => {
       const sessionKey = `session:${sessionToken}`
+      if (!isTutor(sessionKey, socket.id)) {
+        socket.emit('error', { message: 'Only tutors can control participants' })
+        return
+      }
       const session = activeSessions.get(sessionKey)
       if (session) {
         const targetParticipant = Array.from(session.participants.entries()).find(
@@ -156,6 +177,10 @@ app.prepare().then(() => {
 
     socket.on('unmute-participant-video', ({ sessionToken, targetUserId }) => {
       const sessionKey = `session:${sessionToken}`
+      if (!isTutor(sessionKey, socket.id)) {
+        socket.emit('error', { message: 'Only tutors can control participants' })
+        return
+      }
       const session = activeSessions.get(sessionKey)
       if (session) {
         const targetParticipant = Array.from(session.participants.entries()).find(
@@ -169,6 +194,10 @@ app.prepare().then(() => {
 
     socket.on('remove-participant', ({ sessionToken, targetUserId }) => {
       const sessionKey = `session:${sessionToken}`
+      if (!isTutor(sessionKey, socket.id)) {
+        socket.emit('error', { message: 'Only tutors can remove participants' })
+        return
+      }
       const session = activeSessions.get(sessionKey)
       if (session) {
         const targetParticipant = Array.from(session.participants.entries()).find(
@@ -184,15 +213,25 @@ app.prepare().then(() => {
       }
     })
 
+    // Approve participant (tutor only)
     socket.on('approve-participant', ({ sessionToken, targetUserId }) => {
       const sessionKey = `session:${sessionToken}`
       const session = activeSessions.get(sessionKey)
       if (session) {
+        // Check if requester is a tutor
+        const requester = session.participants.get(socket.id)
+        if (!requester || requester.userRole !== 'TUTOR') {
+          socket.emit('error', { message: 'Only tutors can approve participants' })
+          return
+        }
+
+        // Find target participant's socket
         const targetParticipant = Array.from(session.participants.entries()).find(
           ([_, p]) => p.userId === targetUserId
         )
         if (targetParticipant) {
           io.to(targetParticipant[0]).emit('approve-participant', { targetUserId })
+          console.log(`Tutor ${requester.userId} approved participant ${targetUserId} in session ${sessionToken}`)
         }
       }
     })
@@ -203,6 +242,13 @@ app.prepare().then(() => {
       const session = activeSessions.get(sessionKey)
       
       if (session) {
+        // Check if requester is a tutor
+        const requester = session.participants.get(socket.id)
+        if (!requester || requester.userRole !== 'TUTOR') {
+          socket.emit('error', { message: 'Only tutors can end sessions' })
+          return
+        }
+
         // Notify all participants that session is ending
         io.to(sessionToken).emit('session-ended')
         
@@ -210,7 +256,7 @@ app.prepare().then(() => {
         session.participants.clear()
         activeSessions.delete(sessionKey)
         
-        console.log(`Session ${sessionToken} ended by tutor`)
+        console.log(`Session ${sessionToken} ended by tutor ${requester.userId}`)
       }
     })
 

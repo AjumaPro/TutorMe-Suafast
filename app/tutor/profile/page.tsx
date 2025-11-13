@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import Navbar from '@/components/Navbar'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import TutorProfileForm from '@/components/TutorProfileForm'
 import AvailabilityCalendar from '@/components/AvailabilityCalendar'
 
@@ -13,13 +13,33 @@ export default async function TutorProfilePage() {
     redirect('/auth/signin')
   }
 
-  const tutorProfile = await prisma.tutorProfile.findUnique({
-    where: { userId: session.user.id },
-    include: {
-      user: true,
-      availabilitySlots: true,
-    },
-  })
+  // Fetch tutor profile
+  const { data: tutorProfileData } = await supabase
+    .from('tutor_profiles')
+    .select('*')
+    .eq('userId', session.user.id)
+    .single()
+
+  let tutorProfile = tutorProfileData || null
+
+  // Fetch user data
+  if (tutorProfile?.userId) {
+    const { data: userData } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', tutorProfile.userId)
+      .single()
+    tutorProfile.user = userData || null
+  }
+
+  // Fetch availability slots
+  if (tutorProfile?.id) {
+    const { data: availabilitySlots } = await supabase
+      .from('availability_slots')
+      .select('*')
+      .eq('tutorId', tutorProfile.id)
+    tutorProfile.availabilitySlots = availabilitySlots || []
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -102,7 +122,7 @@ export default async function TutorProfilePage() {
                 <div className="space-y-4">
                   <div>
                     <p className="text-sm text-gray-500">Hourly Rate</p>
-                    <p className="text-2xl font-bold text-pink-600">${tutorProfile.hourlyRate}</p>
+                    <p className="text-2xl font-bold text-pink-600">₵{tutorProfile.hourlyRate.toFixed(2)}</p>
                   </div>
                   {tutorProfile.experience && (
                     <div>

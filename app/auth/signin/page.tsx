@@ -5,6 +5,7 @@ import { signIn } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react'
+import TwoFactorVerification from '@/components/TwoFactorVerification'
 
 function SignInForm() {
   const router = useRouter()
@@ -19,6 +20,10 @@ function SignInForm() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [showSuccess, setShowSuccess] = useState(registered)
+  const [requires2FA, setRequires2FA] = useState(false)
+  const [twoFactorMethod, setTwoFactorMethod] = useState<'TOTP' | 'EMAIL' | 'SMS' | null>(null)
+  const [twoFactorSessionToken, setTwoFactorSessionToken] = useState<string | null>(null)
+  const [userPhone, setUserPhone] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -26,6 +31,35 @@ function SignInForm() {
     setLoading(true)
 
     try {
+      // First, check if 2FA is required using custom login endpoint
+      const loginResponse = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password,
+        }),
+      })
+
+      const loginData = await loginResponse.json()
+
+      if (!loginResponse.ok) {
+        setError(loginData.error || 'Invalid email or password. Please try again.')
+        setLoading(false)
+        return
+      }
+
+      // If 2FA is required, show verification form
+      if (loginData.requires2FA) {
+        setRequires2FA(true)
+        setTwoFactorMethod(loginData.method)
+        setTwoFactorSessionToken(loginData.sessionToken)
+        setUserPhone(loginData.phone || null)
+        setLoading(false)
+        return
+      }
+
+      // No 2FA required - proceed with NextAuth login
       const result = await signIn('credentials', {
         email: email.trim().toLowerCase(),
         password,
@@ -33,40 +67,12 @@ function SignInForm() {
       })
 
       if (result?.error) {
-        // NextAuth converts custom errors to 'CredentialsSignin'
-        // We need to check the actual error message
         let errorMessage = 'Invalid email or password. Please try again.'
-        
-        // Check if it's a specific error (not the generic CredentialsSignin)
         if (result.error && result.error !== 'CredentialsSignin') {
           errorMessage = result.error
-        } else {
-          // For CredentialsSignin, check if account might be locked
-          // We'll show a helpful message
-          errorMessage = 'Invalid email or password. Please try again.'
-          
-          // Check if account is locked by trying to unlock it
-          try {
-            const unlockResponse = await fetch('/api/auth/unlock-account', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: email.trim().toLowerCase() }),
-            })
-            
-            if (unlockResponse.ok) {
-              const unlockData = await unlockResponse.json()
-              if (unlockData.message && unlockData.message.includes('unlocked')) {
-                errorMessage = 'Your account was locked but has been unlocked. Please try again.'
-              }
-            }
-          } catch (err) {
-            // Ignore unlock errors
-          }
         }
-        
         setError(errorMessage)
       } else if (result?.ok) {
-        // Success - redirect to callback URL or dashboard
         router.push(callbackUrl)
         router.refresh()
       } else {
@@ -78,6 +84,103 @@ function SignInForm() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handle2FAVerify = async (code: string, isBackupCode: boolean = false) => {
+    setError('')
+    setLoading(true)
+
+    try {
+      // Verify 2FA code
+      const verifyResponse = await fetch('/api/auth/two-factor/verify-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          code,
+          isBackupCode,
+        }),
+      })
+
+      const verifyData = await verifyResponse.json()
+
+      if (!verifyResponse.ok) {
+        throw new Error(verifyData.error || 'Invalid verification code')
+      }
+
+      // 2FA verified - complete login with NextAuth
+      const result = await signIn('credentials', {
+        email: email.trim().toLowerCase(),
+        password,
+        redirect: false,
+      })
+
+      if (result?.error) {
+        throw new Error('Failed to complete login')
+      }
+
+      if (result?.ok) {
+        router.push(callbackUrl)
+        router.refresh()
+      }
+    } catch (err: any) {
+      setError(err.message || 'Verification failed. Please try again.')
+      setLoading(false)
+    }
+  }
+
+  const handle2FAResend = async () => {
+    setError('')
+    setLoading(true)
+
+    try {
+      const response = await fetch('/api/auth/two-factor/send-login-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to resend code')
+      }
+
+      // Update phone number if SMS method
+      if (data.phone) {
+        setUserPhone(data.phone)
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to resend code')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handle2FACancel = () => {
+    setRequires2FA(false)
+    setTwoFactorMethod(null)
+    setTwoFactorSessionToken(null)
+    setError('')
+  }
+
+  if (requires2FA && twoFactorMethod) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-50 via-white to-purple-50 py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-md w-full space-y-8">
+          <TwoFactorVerification
+            method={twoFactorMethod}
+            email={email}
+            phone={userPhone || undefined}
+            onVerify={handle2FAVerify}
+            onResend={(twoFactorMethod === 'EMAIL' || twoFactorMethod === 'SMS') ? handle2FAResend : undefined}
+            onCancel={handle2FACancel}
+          />
+        </div>
+      </div>
+    )
   }
 
   return (

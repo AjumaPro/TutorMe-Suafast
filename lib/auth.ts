@@ -1,7 +1,7 @@
 import { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import bcrypt from 'bcryptjs'
-import { prisma } from './prisma'
+import { supabase } from './supabase-db'
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -27,9 +27,13 @@ export const authOptions: NextAuthOptions = {
           const email = credentials.email.toLowerCase().trim()
           
           // Find user by email
-          const user = await prisma.user.findUnique({
-            where: { email }
-          })
+          const { data: user, error: userError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('email', email)
+            .single()
+          
+          if (userError && userError.code !== 'PGRST116') throw userError
 
           if (!user) {
             console.log('❌ User not found:', email)
@@ -45,13 +49,13 @@ export const authOptions: NextAuthOptions = {
           
           // Auto-unlock if lockout period has passed
           if (lockoutTime && new Date(lockoutTime) <= new Date()) {
-            await prisma.user.update({
-              where: { id: user.id },
-              data: {
+            await supabase
+              .from('users')
+              .update({
                 accountLockedUntil: null,
                 failedLoginAttempts: 0,
-              },
-            })
+              })
+              .eq('id', user.id)
           }
 
           // Verify password (handle missing password field)
@@ -75,33 +79,33 @@ export const authOptions: NextAuthOptions = {
             if (failedAttempts >= maxAttempts) {
               // Lock account for 15 minutes
               const lockoutUntil = new Date(Date.now() + lockoutDuration * 60 * 1000)
-              await prisma.user.update({
-                where: { id: user.id },
-                data: {
+              await supabase
+                .from('users')
+                .update({
                   failedLoginAttempts: failedAttempts,
-                  accountLockedUntil: lockoutUntil,
-                },
-              })
+                  accountLockedUntil: lockoutUntil.toISOString(),
+                })
+                .eq('id', user.id)
               throw new Error(`Too many failed attempts. Account locked for ${lockoutDuration} minutes.`)
             } else {
               // Update failed attempts
-              await prisma.user.update({
-                where: { id: user.id },
-                data: { failedLoginAttempts: failedAttempts },
-              })
+              await supabase
+                .from('users')
+                .update({ failedLoginAttempts: failedAttempts })
+                .eq('id', user.id)
               throw new Error('Invalid email or password')
             }
           }
 
           // Successful login - reset failed attempts and update last login
-          await prisma.user.update({
-            where: { id: user.id },
-            data: {
+          await supabase
+            .from('users')
+            .update({
               failedLoginAttempts: 0,
               accountLockedUntil: null,
-              lastLoginAt: new Date(),
-            },
-          })
+              lastLoginAt: new Date().toISOString(),
+            })
+            .eq('id', user.id)
 
           console.log('✅ Authentication successful for:', email)
           // Return user object for NextAuth

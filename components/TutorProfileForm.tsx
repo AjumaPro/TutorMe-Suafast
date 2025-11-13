@@ -6,6 +6,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { parseJsonArray } from '@/lib/utils'
+import { MapPin, Navigation } from 'lucide-react'
 
 const profileSchema = z.object({
   bio: z.string().min(1, 'Bio is required'),
@@ -14,11 +15,20 @@ const profileSchema = z.object({
   experience: z.number().min(0).optional(),
   hourlyRate: z.number().min(0, 'Hourly rate must be positive'),
   credentials: z.string().url().optional().or(z.literal('')),
+  lessonCategories: z.array(z.string()).min(1, 'Select at least one lesson category'),
+  // Location fields - required for in-person lessons
+  address: z.string().min(1, 'Street address is required'),
+  city: z.string().min(1, 'City is required'),
+  state: z.string().min(1, 'State is required'),
+  zipCode: z.string().min(1, 'Zip code is required'),
+  country: z.string().default('USA'),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
 })
 
 type ProfileFormData = z.infer<typeof profileSchema>
 
-const SUBJECTS = [
+const ACADEMIC_SUBJECTS = [
   'Math',
   'Science',
   'English',
@@ -31,19 +41,50 @@ const SUBJECTS = [
   'Other',
 ]
 
+const PROFESSIONAL_TECHNICAL_SUBJECTS = [
+  'Programming & Software Development',
+  'Web Development',
+  'Data Science & Analytics',
+  'Cybersecurity',
+  'Cloud Computing',
+  'Digital Marketing',
+  'Graphic Design',
+  'Video Editing',
+  'Photography',
+  'Business & Entrepreneurship',
+  'Project Management',
+  'Accounting & Finance',
+  'Excel & Data Analysis',
+  'Public Speaking',
+  'Professional Writing',
+  'Language Learning (Business)',
+  'Other Professional',
+]
+
+const SUBJECTS = [...ACADEMIC_SUBJECTS, ...PROFESSIONAL_TECHNICAL_SUBJECTS]
+
 const GRADES = ['K-5', '6-8', '9-12', 'College', 'Adult']
+
+const LESSON_CATEGORIES = [
+  { value: 'ACADEMIC', label: 'Academic Lessons' },
+  { value: 'PROFESSIONAL_TECHNICAL', label: 'Professional & Technical' },
+]
 
 export default function TutorProfileForm({ tutorProfile }: any) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [geocoding, setGeocoding] = useState(false)
 
-  // Parse subjects and grades from JSON strings if needed
+  // Parse subjects, grades, and lesson categories from JSON strings if needed
   const initialSubjects = tutorProfile?.subjects
     ? parseJsonArray(tutorProfile.subjects)
     : []
   const initialGrades = tutorProfile?.grades ? parseJsonArray(tutorProfile.grades) : []
+  const initialLessonCategories = tutorProfile?.lessonCategories
+    ? parseJsonArray(tutorProfile.lessonCategories)
+    : ['ACADEMIC']
 
   const {
     register,
@@ -60,11 +101,20 @@ export default function TutorProfileForm({ tutorProfile }: any) {
       experience: tutorProfile?.experience || 0,
       hourlyRate: tutorProfile?.hourlyRate || 0,
       credentials: tutorProfile?.credentials || '',
+      lessonCategories: initialLessonCategories,
+      address: tutorProfile?.address || '',
+      city: tutorProfile?.city || '',
+      state: tutorProfile?.state || '',
+      zipCode: tutorProfile?.zipCode || '',
+      country: tutorProfile?.country || 'USA',
+      latitude: tutorProfile?.latitude || undefined,
+      longitude: tutorProfile?.longitude || undefined,
     },
   })
 
   const selectedSubjects = watch('subjects') || []
   const selectedGrades = watch('grades') || []
+  const selectedLessonCategories = watch('lessonCategories') || []
 
   const toggleSubject = (subject: string) => {
     const current = selectedSubjects
@@ -80,6 +130,14 @@ export default function TutorProfileForm({ tutorProfile }: any) {
       ? current.filter((g) => g !== grade)
       : [...current, grade]
     setValue('grades', updated, { shouldValidate: true })
+  }
+
+  const toggleLessonCategory = (category: string) => {
+    const current = selectedLessonCategories
+    const updated = current.includes(category)
+      ? current.filter((c) => c !== category)
+      : [...current, category]
+    setValue('lessonCategories', updated, { shouldValidate: true })
   }
 
   const onSubmit = async (data: ProfileFormData) => {
@@ -149,27 +207,82 @@ export default function TutorProfileForm({ tutorProfile }: any) {
         )}
       </div>
 
+      {/* Lesson Categories */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-3">
+          Lesson Categories <span className="text-red-500">*</span>
+        </label>
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          {LESSON_CATEGORIES.map((category) => (
+            <label
+              key={category.value}
+              className="flex items-center space-x-2 cursor-pointer p-3 rounded-lg border-2 border-gray-200 hover:border-blue-500 transition-colors"
+            >
+              <input
+                type="checkbox"
+                checked={selectedLessonCategories.includes(category.value)}
+                onChange={() => toggleLessonCategory(category.value)}
+                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 focus:ring-2"
+              />
+              <span className="text-sm font-medium text-gray-700">{category.label}</span>
+            </label>
+          ))}
+        </div>
+        {errors.lessonCategories && (
+          <p className="mt-1 text-sm text-red-600">{errors.lessonCategories.message}</p>
+        )}
+      </div>
+
       {/* Subjects You Teach */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-3">
           Subjects You Teach <span className="text-red-500">*</span>
         </label>
-        <div className="grid grid-cols-3 gap-3">
-          {SUBJECTS.map((subject) => (
-            <label
-              key={subject}
-              className="flex items-center space-x-2 cursor-pointer p-2 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              <input
-                type="checkbox"
-                checked={selectedSubjects.includes(subject)}
-                onChange={() => toggleSubject(subject)}
-                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 focus:ring-2"
-              />
-              <span className="text-sm text-gray-700">{subject}</span>
-            </label>
-          ))}
-        </div>
+        {selectedLessonCategories.includes('ACADEMIC') && (
+          <div className="mb-4">
+            <h4 className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Academic Subjects</h4>
+            <div className="grid grid-cols-3 gap-3">
+              {ACADEMIC_SUBJECTS.map((subject) => (
+                <label
+                  key={subject}
+                  className="flex items-center space-x-2 cursor-pointer p-2 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedSubjects.includes(subject)}
+                    onChange={() => toggleSubject(subject)}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                  />
+                  <span className="text-sm text-gray-700">{subject}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        {selectedLessonCategories.includes('PROFESSIONAL_TECHNICAL') && (
+          <div>
+            <h4 className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Professional & Technical Subjects</h4>
+            <div className="grid grid-cols-2 gap-3">
+              {PROFESSIONAL_TECHNICAL_SUBJECTS.map((subject) => (
+                <label
+                  key={subject}
+                  className="flex items-center space-x-2 cursor-pointer p-2 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedSubjects.includes(subject)}
+                    onChange={() => toggleSubject(subject)}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                  />
+                  <span className="text-sm text-gray-700">{subject}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        {selectedLessonCategories.length === 0 && (
+          <p className="text-sm text-gray-500 italic">Please select at least one lesson category above to see available subjects.</p>
+        )}
         {errors.subjects && (
           <p className="mt-1 text-sm text-red-600">{errors.subjects.message}</p>
         )}
@@ -218,11 +331,11 @@ export default function TutorProfileForm({ tutorProfile }: any) {
       {/* Hourly Rate */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          Hourly Rate ($) <span className="text-red-500">*</span>
+          Hourly Rate (₵) <span className="text-red-500">*</span>
         </label>
         <div className="relative">
           <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500">
-            $
+            ₵
           </span>
           <input
             type="number"
@@ -236,6 +349,131 @@ export default function TutorProfileForm({ tutorProfile }: any) {
         {errors.hourlyRate && (
           <p className="mt-1 text-sm text-red-600">{errors.hourlyRate.message}</p>
         )}
+      </div>
+
+      {/* Location Section */}
+      <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <MapPin className="h-5 w-5 text-blue-600" />
+          <h3 className="text-lg font-semibold text-gray-800">Location for In-Person Lessons</h3>
+        </div>
+        <p className="text-sm text-gray-600 mb-4">
+          Your location helps students find you and allows us to calculate travel costs for in-person lessons.
+        </p>
+
+        <div className="space-y-4">
+          {/* Street Address */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Street Address <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              {...register('address')}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="123 Main Street"
+            />
+            {errors.address && (
+              <p className="mt-1 text-sm text-red-600">{errors.address.message}</p>
+            )}
+          </div>
+
+          {/* City, State, Zip */}
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                City <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                {...register('city')}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="City"
+              />
+              {errors.city && (
+                <p className="mt-1 text-sm text-red-600">{errors.city.message}</p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                State <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                {...register('state')}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="State"
+              />
+              {errors.state && (
+                <p className="mt-1 text-sm text-red-600">{errors.state.message}</p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Zip Code <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                {...register('zipCode')}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="12345"
+              />
+              {errors.zipCode && (
+                <p className="mt-1 text-sm text-red-600">{errors.zipCode.message}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Country */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Country
+            </label>
+            <input
+              type="text"
+              {...register('country')}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="USA"
+            />
+          </div>
+
+          {/* Coordinates (Optional - for precise distance calculation) */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Latitude (optional)
+                <span className="text-xs text-gray-500 ml-2">For precise distance calculation</span>
+              </label>
+              <input
+                type="number"
+                step="any"
+                {...register('latitude', { valueAsNumber: true })}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="40.7128"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Longitude (optional)
+                <span className="text-xs text-gray-500 ml-2">For precise distance calculation</span>
+              </label>
+              <input
+                type="number"
+                step="any"
+                {...register('longitude', { valueAsNumber: true })}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="-74.0060"
+              />
+            </div>
+          </div>
+
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+            <p className="text-xs text-yellow-800">
+              <strong>Note:</strong> If you don&apos;t provide coordinates, we&apos;ll use your address for approximate distance calculations. 
+              For more accurate distance-based pricing, consider adding latitude and longitude coordinates.
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Credentials URL */}

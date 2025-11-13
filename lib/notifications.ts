@@ -1,4 +1,4 @@
-import { prisma } from './prisma'
+import { supabase } from './supabase-db'
 
 export type NotificationType =
   | 'BOOKING_CREATED'
@@ -31,16 +31,24 @@ export async function createNotification({
   metadata,
 }: CreateNotificationParams) {
   try {
-    return await prisma.notification.create({
-      data: {
+    const { data, error } = await supabase
+      .from('notifications')
+      .insert({
         userId,
         type,
         title,
         message,
-        link,
+        link: link || null,
         metadata: metadata ? JSON.stringify(metadata) : null,
-      },
-    })
+        isRead: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .select()
+      .single()
+    
+    if (error) throw error
+    return data
   } catch (error) {
     console.error('Error creating notification:', error)
     throw error

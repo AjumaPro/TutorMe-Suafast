@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 
 export async function GET(request: Request) {
   try {
@@ -18,31 +18,30 @@ export async function GET(request: Request) {
     const unreadOnly = searchParams.get('unreadOnly') === 'true'
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : undefined
 
-    // Check if notification model exists (for backward compatibility during migration)
-    if (!prisma.notification) {
-      return NextResponse.json({
-        notifications: [],
-        unreadCount: 0,
-      })
-    }
-
-    const where: any = { userId: session.user.id }
+    // Build query
+    let query = supabase
+      .from('notifications')
+      .select('*')
+      .eq('userId', session.user.id)
+    
     if (unreadOnly) {
-      where.isRead = false
+      query = query.eq('isRead', false)
     }
+    
+    query = query.order('createdAt', { ascending: false })
+    
+    if (limit) {
+      query = query.limit(limit)
+    }
+    
+    const { data: notifications } = await query
 
-    const notifications = await prisma.notification.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-    })
-
-    const unreadCount = await prisma.notification.count({
-      where: {
-        userId: session.user.id,
-        isRead: false,
-      },
-    })
+    // Get unread count
+    const { count: unreadCount } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('userId', session.user.id)
+      .eq('isRead', false)
 
     return NextResponse.json({
       notifications,
@@ -71,28 +70,21 @@ export async function PATCH(request: Request) {
     const body = await request.json()
     const { notificationId, markAllAsRead } = body
 
-    // Check if notification model exists
-    if (!prisma.notification) {
-      return NextResponse.json(
-        { error: 'Notifications feature not available yet' },
-        { status: 503 }
-      )
-    }
-
     if (markAllAsRead) {
-      await prisma.notification.updateMany({
-        where: { userId: session.user.id, isRead: false },
-        data: { isRead: true },
-      })
+      await supabase
+        .from('notifications')
+        .update({ isRead: true })
+        .eq('userId', session.user.id)
+        .eq('isRead', false)
 
       return NextResponse.json({ message: 'All notifications marked as read' })
     }
 
     if (notificationId) {
-      await prisma.notification.update({
-        where: { id: notificationId },
-        data: { isRead: true },
-      })
+      await supabase
+        .from('notifications')
+        .update({ isRead: true })
+        .eq('id', notificationId)
 
       return NextResponse.json({ message: 'Notification marked as read' })
     }

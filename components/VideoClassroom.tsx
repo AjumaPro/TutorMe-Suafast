@@ -46,8 +46,8 @@ export default function VideoClassroom({ booking, userRole, sessionToken }: Vide
   
   // Expected participants based on booking
   const expectedParticipants = [
-    { id: booking.tutor.user.email, name: booking.tutor.user.name, role: 'TUTOR', email: booking.tutor.user.email },
-    { id: booking.student.email, name: booking.student.name, role: 'PARENT', email: booking.student.email },
+    { id: booking.tutor?.user?.email || '', name: booking.tutor?.user?.name || 'Unknown Tutor', role: 'TUTOR', email: booking.tutor?.user?.email || '' },
+    { id: booking.student?.email || '', name: booking.student?.name || 'Unknown Student', role: 'PARENT', email: booking.student?.email || '' },
   ]
   
   const isTutor = userRole === 'TUTOR'
@@ -285,7 +285,8 @@ export default function VideoClassroom({ booking, userRole, sessionToken }: Vide
                 [p.userId]: {
                   audioMuted: false,
                   videoMuted: false,
-                  approved: p.userRole === 'TUTOR' || (p.userRole === 'PARENT' && !isTutor),
+                  // Only tutors are auto-approved. Students need tutor approval
+                  approved: p.userRole === 'TUTOR',
                 },
               }))
             }
@@ -628,8 +629,8 @@ export default function VideoClassroom({ booking, userRole, sessionToken }: Vide
               </p>
               <p className="text-gray-600">
                 {userRole === 'PARENT'
-                  ? booking.tutor.user.name
-                  : booking.student.name}
+                  ? booking.tutor?.user?.name || 'Unknown Tutor'
+                  : booking.student?.name || 'Unknown Student'}
               </p>
             </div>
           </div>
@@ -786,7 +787,7 @@ export default function VideoClassroom({ booking, userRole, sessionToken }: Vide
                             >
                               <VideoOff className={`h-3.5 w-3.5 ${state.videoMuted ? 'text-red-600' : 'text-gray-600'}`} />
                             </button>
-                            {!state.approved && (
+                            {!state.approved && isTutor && (
                               <button
                                 onClick={() => {
                                   if (participant?.userId) {
@@ -801,7 +802,7 @@ export default function VideoClassroom({ booking, userRole, sessionToken }: Vide
                                   }
                                 }}
                                 className="p-1 hover:bg-green-100 rounded transition-colors"
-                                title="Approve"
+                                title="Approve Student"
                               >
                                 <CheckCircle className="h-3 w-3 text-green-600" />
                               </button>
@@ -954,8 +955,8 @@ export default function VideoClassroom({ booking, userRole, sessionToken }: Vide
           <p className="text-sm text-gray-600">
             {userRole === 'PARENT' ? 'Tutor' : 'Student'}:{' '}
             {userRole === 'PARENT'
-              ? booking.tutor.user.name
-              : booking.student.name}
+              ? booking.tutor?.user?.name || 'Unknown Tutor'
+              : booking.student?.name || 'Unknown Student'}
           </p>
           <p className="text-xs text-gray-500 mt-1">
             Subject: {booking.subject} • Duration: {booking.duration} minutes

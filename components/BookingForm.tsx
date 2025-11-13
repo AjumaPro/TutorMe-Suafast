@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Calendar, Clock, MapPin, Video, DollarSign, Plus, Repeat, User, Star, CheckCircle, AlertCircle, Users } from 'lucide-react'
+import { Calendar, Clock, MapPin, Video, DollarSign, Plus, Repeat, User, Star, CheckCircle, AlertCircle, Users, Navigation, Info } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
+import { calculateDistance, getDistanceSurcharge, formatDistance } from '@/lib/distance'
+import { formatCurrency, parseCurrencyCode } from '@/lib/currency'
 
 const bookingSchema = z.object({
   subject: z.string().min(1, 'Subject is required'),
@@ -37,6 +39,12 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
   const [availableGroupClasses, setAvailableGroupClasses] = useState<any[]>([])
   const [loadingGroupClasses, setLoadingGroupClasses] = useState(false)
   const [selectedGroupClassToJoin, setSelectedGroupClassToJoin] = useState<string | null>(null)
+  const [paymentFrequency, setPaymentFrequency] = useState<'HOURLY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'>('HOURLY')
+  const [distanceInfo, setDistanceInfo] = useState<{
+    distance: number
+    surcharge: number
+    shouldSuggestOnline: boolean
+  } | null>(null)
   const [newAddress, setNewAddress] = useState({
     street: '',
     city: '',
@@ -44,6 +52,8 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
     zipCode: '',
     country: 'USA',
     isDefault: false,
+    latitude: undefined as number | undefined,
+    longitude: undefined as number | undefined,
   })
 
   const {
@@ -63,7 +73,68 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
   const lessonType = watch('lessonType')
   const duration = watch('duration') || 60
   const subject = watch('subject')
-  const price = ((tutor.hourlyRate * duration) / 60).toFixed(2)
+  
+  // Calculate distance and surcharge when address is selected for in-person lessons
+  const selectedAddressId = watch('addressId')
+  useEffect(() => {
+    if (lessonType === 'IN_PERSON' && selectedAddressId && tutor.latitude && tutor.longitude) {
+      const selectedAddress = addresses.find((addr: any) => addr.id === selectedAddressId)
+      if (selectedAddress && selectedAddress.latitude && selectedAddress.longitude) {
+        const distance = calculateDistance(
+          tutor.latitude,
+          tutor.longitude,
+          selectedAddress.latitude,
+          selectedAddress.longitude
+        )
+        const surchargeInfo = getDistanceSurcharge(distance)
+        setDistanceInfo({
+          distance,
+          surcharge: surchargeInfo.percentage,
+          shouldSuggestOnline: surchargeInfo.shouldSuggestOnline,
+        })
+      } else {
+        setDistanceInfo(null)
+      }
+    } else {
+      setDistanceInfo(null)
+    }
+  }, [lessonType, selectedAddressId, addresses, tutor.latitude, tutor.longitude])
+
+  // Calculate price based on payment frequency and distance surcharge
+  const calculatePrice = () => {
+    const hourlyRate = tutor.hourlyRate || 0
+    const hours = duration / 60
+    const lessonsPerWeek = 1 // Can be made configurable in the future
+    
+    // Base price calculation
+    let basePrice = 0
+    switch (paymentFrequency) {
+      case 'HOURLY':
+        basePrice = hourlyRate * hours
+        break
+      case 'WEEKLY':
+        basePrice = hourlyRate * hours * lessonsPerWeek
+        break
+      case 'MONTHLY':
+        basePrice = hourlyRate * hours * lessonsPerWeek * 4
+        break
+      case 'YEARLY':
+        basePrice = hourlyRate * hours * lessonsPerWeek * 52
+        break
+      default:
+        basePrice = hourlyRate * hours
+    }
+    
+    // Add distance surcharge for in-person lessons
+    if (lessonType === 'IN_PERSON' && distanceInfo && distanceInfo.surcharge > 0) {
+      const surchargeAmount = (basePrice * distanceInfo.surcharge) / 100
+      basePrice += surchargeAmount
+    }
+    
+    return basePrice.toFixed(2)
+  }
+  
+  const price = calculatePrice()
 
   // Fetch addresses on mount and when needed
   useEffect(() => {
@@ -72,7 +143,8 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
         const response = await fetch('/api/addresses')
         if (response.ok) {
           const data = await response.json()
-          setAddresses(data.addresses || [])
+          const fetchedAddresses = data.addresses || []
+          setAddresses(fetchedAddresses)
         }
       } catch (err) {
         console.error('Failed to fetch addresses:', err)
@@ -80,6 +152,20 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
     }
     fetchAddresses()
   }, [])
+
+  // Auto-select default address when lesson type changes to IN_PERSON
+  const currentAddressId = watch('addressId')
+  useEffect(() => {
+    if (lessonType === 'IN_PERSON' && addresses.length > 0) {
+      const defaultAddress = addresses.find((addr: any) => addr.isDefault)
+      if (defaultAddress && !currentAddressId) {
+        setValue('addressId', defaultAddress.id)
+      }
+    } else if (lessonType === 'ONLINE') {
+      // Clear address selection for online lessons
+      setValue('addressId', '')
+    }
+  }, [lessonType, addresses, setValue, currentAddressId])
 
   // Fetch tutor availability and existing bookings
   useEffect(() => {
@@ -259,10 +345,16 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
         zipCode: '',
         country: 'USA',
         isDefault: false,
+        latitude: undefined,
+        longitude: undefined,
       })
       
       // Set the newly added address as selected
       setValue('addressId', result.address.id)
+      
+      // Show success message
+      setSuccess('Address saved successfully!')
+      setTimeout(() => setSuccess(''), 3000)
     } catch (err) {
       setError('An error occurred while adding the address')
     } finally {
@@ -307,31 +399,41 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
       return
     }
 
-    if (data.lessonType === 'IN_PERSON' && !data.addressId) {
-      setError('Please select an address for in-person lessons')
-      setLoading(false)
-      return
+    // Validate address for in-person lessons
+    if (data.lessonType === 'IN_PERSON') {
+      if (!data.addressId || data.addressId.trim() === '') {
+        setError('Please select an address for in-person lessons')
+        setLoading(false)
+        // Scroll to address section
+        setTimeout(() => {
+          const addressSection = document.querySelector('[data-address-section]')
+          if (addressSection) {
+            addressSection.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          }
+        }, 100)
+        return
+      }
     }
 
     // If joining an existing group class
     if (isGroupClass && selectedGroupClassToJoin) {
-      try {
+    try {
         const response = await fetch('/api/bookings/group', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
             groupClassId: selectedGroupClassToJoin,
-          }),
-        })
+        }),
+      })
 
-        if (!response.ok) {
-          const result = await response.json()
-          setError(result.error || 'Failed to join group class')
-          setLoading(false)
-          return
-        }
-
+      if (!response.ok) {
         const result = await response.json()
+          setError(result.error || 'Failed to join group class')
+        setLoading(false)
+        return
+      }
+
+      const result = await response.json()
 
         // Redirect to payment page
         if (result.booking && result.booking.id) {
@@ -357,6 +459,7 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
         scheduledAt: scheduledAt.toISOString(),
         duration: data.duration,
         price: parseFloat(price),
+        paymentFrequency: paymentFrequency,
         isGroupClass: isGroupClass || false,
         maxParticipants: 10,
       }
@@ -381,7 +484,22 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
 
       if (!response.ok) {
         console.error('Booking creation failed:', result)
-        setError(result.details || result.error || 'Failed to create booking. Please try again.')
+        // Extract error message from various response formats
+        let errorMsg = 'Failed to create booking. Please try again.'
+        if (result.error) {
+          errorMsg = result.error
+        } else if (result.details) {
+          if (typeof result.details === 'string') {
+            errorMsg = result.details
+          } else if (result.details.message) {
+            errorMsg = result.details.message
+          } else if (result.details.error) {
+            errorMsg = result.details.error
+          }
+        } else if (result.message) {
+          errorMsg = result.message
+        }
+        setError(errorMsg)
         setLoading(false)
         return
       }
@@ -395,9 +513,20 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
         setError('Booking created but ID not returned. Please check your bookings.')
         setLoading(false)
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Booking creation error:', err)
-      setError(`An error occurred: ${err instanceof Error ? err.message : 'Unknown error'}. Please try again.`)
+      // Extract error message from various error types
+      let errorMsg = 'An error occurred. Please try again.'
+      if (err instanceof Error) {
+        errorMsg = err.message
+      } else if (err?.message) {
+        errorMsg = err.message
+      } else if (typeof err === 'string') {
+        errorMsg = err
+      } else if (err?.error) {
+        errorMsg = err.error
+      }
+      setError(errorMsg)
       setLoading(false)
     }
   }
@@ -606,104 +735,229 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
           </div>
 
           {lessonType === 'IN_PERSON' && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-medium text-gray-700">
-                Address *
-              </label>
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4" data-address-section>
+              <div className="flex items-center justify-between mb-3">
+                <label className="block text-sm font-semibold text-gray-800 flex items-center gap-2">
+                  <MapPin className="h-5 w-5 text-blue-600" />
+                  Select Address for In-Person Lesson *
+                </label>
                 <button
                   type="button"
                   onClick={() => setShowAddAddress(!showAddAddress)}
-                  className="text-sm text-pink-600 hover:text-pink-700 flex items-center gap-1"
+                  className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 px-3 py-1 rounded-md hover:bg-blue-100 transition-colors"
                 >
                   <Plus className="h-4 w-4" />
-                  {showAddAddress ? 'Cancel' : 'Add New Address'}
+                  {showAddAddress ? 'Cancel' : 'Add New'}
                 </button>
               </div>
 
               {showAddAddress && (
-                <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <div className="mb-4 p-4 bg-white rounded-lg border-2 border-blue-300 shadow-sm">
+                  <h4 className="text-sm font-semibold text-gray-800 mb-3">Add New Address</h4>
                   <form onSubmit={handleAddAddress} className="space-y-3">
                     <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Street Address</label>
                       <input
                         type="text"
-                        placeholder="Street Address"
+                        placeholder="123 Main Street"
                         value={newAddress.street}
                         onChange={(e) => setNewAddress({ ...newAddress, street: e.target.value })}
                         required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-pink-500 focus:border-pink-500"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-3">
-                      <input
-                        type="text"
-                        placeholder="City"
-                        value={newAddress.city}
-                        onChange={(e) => setNewAddress({ ...newAddress, city: e.target.value })}
-                        required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-pink-500 focus:border-pink-500"
-                      />
-                      <input
-                        type="text"
-                        placeholder="State"
-                        value={newAddress.state}
-                        onChange={(e) => setNewAddress({ ...newAddress, state: e.target.value })}
-                        required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-pink-500 focus:border-pink-500"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <input
-                        type="text"
-                        placeholder="Zip Code"
-                        value={newAddress.zipCode}
-                        onChange={(e) => setNewAddress({ ...newAddress, zipCode: e.target.value })}
-                        required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-pink-500 focus:border-pink-500"
-                      />
-                      <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">City</label>
                         <input
-                          type="checkbox"
-                          checked={newAddress.isDefault}
-                          onChange={(e) => setNewAddress({ ...newAddress, isDefault: e.target.checked })}
-                          className="rounded"
+                          type="text"
+                          placeholder="City"
+                          value={newAddress.city}
+                          onChange={(e) => setNewAddress({ ...newAddress, city: e.target.value })}
+                          required
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
-                        Set as default
-                      </label>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">State</label>
+                        <input
+                          type="text"
+                          placeholder="State"
+                          value={newAddress.state}
+                          onChange={(e) => setNewAddress({ ...newAddress, state: e.target.value })}
+                          required
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
                     </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Zip Code</label>
+                        <input
+                          type="text"
+                          placeholder="12345"
+                          value={newAddress.zipCode}
+                          onChange={(e) => setNewAddress({ ...newAddress, zipCode: e.target.value })}
+                          required
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={newAddress.isDefault}
+                            onChange={(e) => setNewAddress({ ...newAddress, isDefault: e.target.checked })}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span>Set as default</span>
+                        </label>
+                      </div>
+                    </div>
+                    
+                    {/* Optional Coordinates for Distance Calculation */}
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                      <p className="text-xs font-medium text-gray-700 mb-2">
+                        Optional: Coordinates for precise distance calculation
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-gray-600 mb-1">Latitude</label>
+                          <input
+                            type="number"
+                            step="any"
+                            placeholder="40.7128"
+                            value={newAddress.latitude || ''}
+                            onChange={(e) => setNewAddress({ 
+                              ...newAddress, 
+                              latitude: e.target.value ? parseFloat(e.target.value) : undefined 
+                            })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-600 mb-1">Longitude</label>
+                          <input
+                            type="number"
+                            step="any"
+                            placeholder="-74.0060"
+                            value={newAddress.longitude || ''}
+                            onChange={(e) => setNewAddress({ 
+                              ...newAddress, 
+                              longitude: e.target.value ? parseFloat(e.target.value) : undefined 
+                            })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">
+                        Leave blank if you don&apos;t have coordinates. Distance calculation will use approximate values.
+                      </p>
+                    </div>
+                    
                     <button
                       type="submit"
                       disabled={addingAddress}
-                      className="w-full px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 disabled:opacity-50 font-medium"
+                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-medium transition-colors flex items-center justify-center gap-2"
                     >
-                      {addingAddress ? 'Adding...' : 'Add Address'}
+                      {addingAddress ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Saving Address...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="h-4 w-4" />
+                          Save Address
+                        </>
+                      )}
                     </button>
                   </form>
                 </div>
               )}
 
               {addresses.length === 0 && !showAddAddress ? (
-                <div className="bg-yellow-50 border border-yellow-200 rounded p-4">
-                  <p className="text-yellow-800 text-sm">
-                    No addresses saved. Please add an address to continue.
-                  </p>
+                <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-yellow-800 font-medium text-sm mb-1">No addresses saved</p>
+                      <p className="text-yellow-700 text-xs">
+                        Please add an address above to continue with your in-person lesson booking.
+                      </p>
+                    </div>
+                  </div>
                 </div>
-              ) : (
-                <select
-                  {...register('addressId')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                >
-                  <option value="">Select an address</option>
-                  {addresses.map((address: any) => (
-                    <option key={address.id} value={address.id}>
-                      {address.street}, {address.city}, {address.state} {address.zipCode}
-                      {address.isDefault ? ' (Default)' : ''}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {errors.addressId && (
-                <p className="mt-1 text-sm text-red-600">{errors.addressId.message}</p>
+              ) : addresses.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-2">
+                    Choose from saved addresses:
+                  </label>
+                  <select
+                    {...register('addressId', {
+                      required: lessonType === 'IN_PERSON' ? 'Please select an address for in-person lessons' : false
+                    })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm font-medium bg-white"
+                  >
+                    <option value="">-- Select an address --</option>
+                    {addresses.map((address: any) => (
+                      <option key={address.id} value={address.id}>
+                        {address.street}, {address.city}, {address.state} {address.zipCode}
+                        {address.isDefault ? ' ⭐ (Default)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.addressId && (
+                    <div className="mt-2 bg-red-50 border-l-4 border-red-400 p-3 rounded">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4 text-red-400" />
+                        <p className="text-red-700 text-sm font-medium">{errors.addressId.message}</p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Distance and Surcharge Info */}
+                  {distanceInfo && (
+                    <div className="mt-3 space-y-2">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Navigation className="h-4 w-4 text-blue-600" />
+                          <span className="text-sm font-medium text-blue-900">
+                            Distance: {formatDistance(distanceInfo.distance)}
+                          </span>
+                        </div>
+                        {distanceInfo.surcharge > 0 && (
+                          <div className="text-xs text-blue-700">
+                            Travel surcharge: +{distanceInfo.surcharge}% ({tutor.currency || 'GHS'} {((parseFloat(price) * distanceInfo.surcharge) / (100 + distanceInfo.surcharge)).toFixed(2)})
+                          </div>
+                        )}
+                      </div>
+                      
+                      {distanceInfo.shouldSuggestOnline && (
+                        <div className="bg-orange-50 border-2 border-orange-300 rounded-lg p-4">
+                          <div className="flex items-start gap-3">
+                            <Info className="h-5 w-5 text-orange-600 flex-shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-orange-800 font-semibold text-sm mb-1">
+                                Consider Online Lessons
+                              </p>
+                              <p className="text-orange-700 text-xs mb-2">
+                                The tutor is {formatDistance(distanceInfo.distance)} away. Online lessons may be more convenient and cost-effective.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => setValue('lessonType', 'ONLINE')}
+                                className="text-xs text-orange-700 underline hover:text-orange-900 font-medium"
+                              >
+                                Switch to Online Lesson
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -897,6 +1151,82 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
+              Payment Frequency *
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className={`flex items-center p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                paymentFrequency === 'HOURLY'
+                  ? 'border-pink-500 bg-pink-50'
+                  : 'border-gray-200 hover:border-pink-300'
+              }`}>
+                <input
+                  type="radio"
+                  value="HOURLY"
+                  checked={paymentFrequency === 'HOURLY'}
+                  onChange={(e) => setPaymentFrequency(e.target.value as any)}
+                  className="mr-2"
+                />
+                <div>
+                  <div className="font-medium text-sm">Hourly</div>
+                  <div className="text-xs text-gray-500">Pay per lesson</div>
+                </div>
+              </label>
+              <label className={`flex items-center p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                paymentFrequency === 'WEEKLY'
+                  ? 'border-pink-500 bg-pink-50'
+                  : 'border-gray-200 hover:border-pink-300'
+              }`}>
+                <input
+                  type="radio"
+                  value="WEEKLY"
+                  checked={paymentFrequency === 'WEEKLY'}
+                  onChange={(e) => setPaymentFrequency(e.target.value as any)}
+                  className="mr-2"
+                />
+                <div>
+                  <div className="font-medium text-sm">Weekly</div>
+                  <div className="text-xs text-gray-500">Pay weekly</div>
+                </div>
+              </label>
+              <label className={`flex items-center p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                paymentFrequency === 'MONTHLY'
+                  ? 'border-pink-500 bg-pink-50'
+                  : 'border-gray-200 hover:border-pink-300'
+              }`}>
+                <input
+                  type="radio"
+                  value="MONTHLY"
+                  checked={paymentFrequency === 'MONTHLY'}
+                  onChange={(e) => setPaymentFrequency(e.target.value as any)}
+                  className="mr-2"
+                />
+                <div>
+                  <div className="font-medium text-sm">Monthly</div>
+                  <div className="text-xs text-gray-500">Pay monthly</div>
+                </div>
+              </label>
+              <label className={`flex items-center p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                paymentFrequency === 'YEARLY'
+                  ? 'border-pink-500 bg-pink-50'
+                  : 'border-gray-200 hover:border-pink-300'
+              }`}>
+                <input
+                  type="radio"
+                  value="YEARLY"
+                  checked={paymentFrequency === 'YEARLY'}
+                  onChange={(e) => setPaymentFrequency(e.target.value as any)}
+                  className="mr-2"
+                />
+                <div>
+                  <div className="font-medium text-sm">Yearly</div>
+                  <div className="text-xs text-gray-500">Pay yearly</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Notes (optional)
             </label>
             <textarea
@@ -934,11 +1264,17 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
             </div>
               <div className="flex justify-between items-center pb-3 border-b">
                 <span className="text-gray-600">Hourly Rate:</span>
-                <span className="font-medium text-gray-900">${tutor.hourlyRate}/hr</span>
+                <span className="font-medium text-gray-900">
+                  {formatCurrency(tutor.hourlyRate, parseCurrencyCode(tutor.currency))}/hr
+                </span>
             </div>
               <div className="flex justify-between items-center pb-3 border-b">
               <span className="text-gray-600">Duration:</span>
                 <span className="font-medium text-gray-900">{duration} minutes</span>
+              </div>
+              <div className="flex justify-between items-center pb-3 border-b">
+                <span className="text-gray-600">Payment Frequency:</span>
+                <span className="font-medium text-gray-900 capitalize">{paymentFrequency.toLowerCase()}</span>
               </div>
               {selectedDate && selectedTime && (
                 <div className="bg-gray-50 rounded-lg p-3 mb-3">
@@ -948,11 +1284,28 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
                 </div>
               )}
               <div className="pt-3 border-t">
+                {distanceInfo && distanceInfo.surcharge > 0 && lessonType === 'IN_PERSON' && (
+                  <div className="mb-2 space-y-1 text-sm">
+                    <div className="flex justify-between text-gray-600">
+                      <span>Base Price:</span>
+                      <span>{tutor.currency || 'GHS'} {((parseFloat(price) * 100) / (100 + distanceInfo.surcharge)).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-blue-600">
+                      <span>Travel Surcharge ({distanceInfo.surcharge}%):</span>
+                      <span>+{tutor.currency || 'GHS'} {((parseFloat(price) * distanceInfo.surcharge) / (100 + distanceInfo.surcharge)).toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
                 <div className="flex justify-between items-center">
                   <span className="text-lg font-semibold text-gray-900">Total:</span>
-                  <span className="text-2xl font-bold text-pink-600">${price}</span>
+                  <span className="text-2xl font-bold text-pink-600">{tutor.currency || 'GHS'} {price}</span>
             </div>
                 <p className="text-xs text-gray-500 mt-1">Payment will be processed after booking confirmation</p>
+                {distanceInfo && distanceInfo.surcharge > 0 && (
+                  <p className="text-xs text-blue-600 mt-1">
+                    Includes {distanceInfo.surcharge}% travel surcharge for {formatDistance(distanceInfo.distance)} distance
+                  </p>
+                )}
               </div>
             </div>
           </div>

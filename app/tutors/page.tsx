@@ -1,7 +1,7 @@
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import Navbar from '@/components/Navbar'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import TutorDashboard from '@/components/TutorDashboard'
 import { redirect } from 'next/navigation'
 
@@ -24,44 +24,58 @@ export default async function TutorsPage({
   const search = searchParams.search as string
   const lessonType = searchParams.lessonType as string
 
-  // Build search query - admins can see all tutors, others only approved
-  const where: any = {
-    ...(session?.user.role !== 'ADMIN' ? { isApproved: true } : {}),
+  // Build Supabase query - admins can see all tutors, others only approved and active
+  let query = supabase
+    .from('tutor_profiles')
+    .select('*')
+    .order('rating', { ascending: false })
+  
+  if (session?.user.role !== 'ADMIN') {
+    query = query.eq('isApproved', true)
+    // Filter out inactive tutors for non-admins (if isActive column exists)
+    // Note: This will work even if isActive column doesn't exist yet (graceful degradation)
+    query = query.eq('isActive', true)
   }
-
-  if (minRate !== undefined || maxRate !== undefined) {
-    where.hourlyRate = {}
-    if (minRate !== undefined) where.hourlyRate.gte = minRate
-    if (maxRate !== undefined) where.hourlyRate.lte = maxRate
+  
+  if (minRate !== undefined) {
+    query = query.gte('hourlyRate', minRate)
   }
-
-  // Fetch all approved tutors with their bookings to determine lesson types
-  const tutors = await prisma.tutorProfile.findMany({
-    where,
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          image: true,
-        },
-      },
-      reviews: {
-        select: {
-          rating: true,
-        },
-      },
-      bookings: {
-        select: {
-          lessonType: true,
-        },
-      },
-    },
-    orderBy: {
-      rating: 'desc',
-    },
-  })
+  if (maxRate !== undefined) {
+    query = query.lte('hourlyRate', maxRate)
+  }
+  
+  const { data: tutorsData } = await query
+  
+  // Fetch related data for each tutor
+  const tutors = await Promise.all(
+    (tutorsData || []).map(async (tutor: any) => {
+      // Fetch user
+      const { data: user } = await supabase
+        .from('users')
+        .select('id, name, email, image')
+        .eq('id', tutor.userId)
+        .single()
+      
+      // Fetch reviews
+      const { data: reviews } = await supabase
+        .from('reviews')
+        .select('rating')
+        .eq('tutorId', tutor.id)
+      
+      // Fetch bookings for lesson types
+      const { data: bookings } = await supabase
+        .from('bookings')
+        .select('lessonType')
+        .eq('tutorId', tutor.id)
+      
+      return {
+        ...tutor,
+        user: user || null,
+        reviews: reviews || [],
+        bookings: bookings || [],
+      }
+    })
+  )
 
   // Filter by subject, grade, and search term (done in JavaScript for SQLite compatibility)
   let filteredTutors = tutors

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 
 // Remove student/tutor from a class (cancel booking)
 export async function DELETE(
@@ -21,9 +21,11 @@ export async function DELETE(
     const { id } = await params
 
     // Get the booking
-    const booking = await prisma.booking.findUnique({
-      where: { id },
-    })
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', id)
+      .single()
 
     if (!booking) {
       return NextResponse.json(
@@ -33,12 +35,13 @@ export async function DELETE(
     }
 
     // Cancel the booking
-    await prisma.booking.update({
-      where: { id },
-      data: {
+    await supabase
+      .from('bookings')
+      .update({
         status: 'CANCELLED',
-      },
-    })
+        updatedAt: new Date().toISOString(),
+      })
+      .eq('id', id)
 
     return NextResponse.json({
       message: 'Student/tutor removed from class successfully',

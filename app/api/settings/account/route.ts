@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
 
 const accountActionSchema = z.object({
@@ -23,9 +23,11 @@ export async function POST(request: Request) {
     const body = await request.json()
     const validatedData = accountActionSchema.parse(body)
 
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-    })
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', session.user.id)
+      .single()
 
     if (!user) {
       return NextResponse.json(
@@ -55,9 +57,10 @@ export async function POST(request: Request) {
       }
 
       // Delete user (cascade will handle related records)
-      await prisma.user.delete({
-        where: { id: session.user.id },
-      })
+      await supabase
+        .from('users')
+        .delete()
+        .eq('id', session.user.id)
 
       return NextResponse.json(
         { message: 'Account deleted successfully' },

@@ -7,7 +7,6 @@ import Image from 'next/image'
 import {
   Star,
   MapPin,
-  DollarSign,
   BookOpen,
   User,
   Search,
@@ -20,6 +19,7 @@ import {
   Video,
   Monitor,
 } from 'lucide-react'
+import { formatCurrency, parseCurrencyCode } from '@/lib/currency'
 
 const SUBJECTS = [
   'Math',
@@ -437,6 +437,17 @@ export default function TutorDashboard({ tutors, initialFilters, isAdmin = false
                     </div>
                   )}
 
+                  {/* Location */}
+                  {tutor.city && tutor.state && (
+                    <div className="mb-4 flex items-center gap-2 text-sm text-gray-600">
+                      <MapPin className="h-4 w-4 text-gray-400" />
+                      <span>
+                        {tutor.city}, {tutor.state}
+                        {tutor.zipCode && ` ${tutor.zipCode}`}
+                      </span>
+                    </div>
+                  )}
+
                   {/* Experience and Rate */}
                   <div className="flex items-center justify-between pt-4 border-t border-gray-200">
                     <div>
@@ -447,9 +458,8 @@ export default function TutorDashboard({ tutors, initialFilters, isAdmin = false
                       )}
                     </div>
                     <div className="text-right">
-                      <div className="flex items-center gap-1 text-lg font-bold text-pink-600">
-                        <DollarSign className="h-5 w-5" />
-                        {tutor.hourlyRate}
+                      <div className="text-lg font-bold text-pink-600">
+                        {formatCurrency(tutor.hourlyRate, parseCurrencyCode(tutor.currency))}
                       </div>
                       <span className="text-xs text-gray-500">per hour</span>
                     </div>

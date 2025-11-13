@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -30,6 +30,15 @@ model User {
   failedLoginAttempts Int @default(0) // Track failed login attempts
   accountLockedUntil DateTime? // Account lockout until this time
   lastLoginAt   DateTime? // Track last successful login
+  // Two-Factor Authentication fields
+  twoFactorEnabled Boolean @default(false)
+  twoFactorMethod String? // "TOTP", "EMAIL", or "SMS"
+  totpSecret String? // Secret key for TOTP (encrypted)
+  backupCodes String? // JSON array of backup codes (hashed)
+  emailOtpCode String? // Email OTP code
+  emailOtpExpiry DateTime? // Email OTP expiration
+  smsOtpCode String? // SMS OTP code
+  smsOtpExpiry DateTime? // SMS OTP expiration
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

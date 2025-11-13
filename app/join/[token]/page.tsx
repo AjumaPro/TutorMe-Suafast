@@ -3,7 +3,7 @@ import dynamic from 'next/dynamic'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import Navbar from '@/components/Navbar'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 
 // Dynamically import VideoClassroomWrapper to avoid webpack issues
 const VideoClassroomWrapper = dynamic(() => import('@/components/VideoClassroomWrapper'), {
@@ -34,31 +34,90 @@ export default async function JoinSessionPage({
   const { token } = await params
 
   // Get video session
-  const videoSession = await prisma.videoSession.findUnique({
-    where: { sessionToken: token },
-    include: {
-      tutor: {
-        include: {
-          user: {
-            select: {
-              name: true,
-              email: true,
-            },
-          },
-        },
-      },
-      booking: {
-        include: {
-          student: {
-            select: {
-              name: true,
-              email: true,
-            },
-          },
-        },
-      },
-    },
-  })
+  const { data: videoSessionData } = await supabase
+    .from('video_sessions')
+    .select('*')
+    .eq('sessionToken', token)
+    .single()
+
+  if (!videoSessionData) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navbar />
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="bg-white rounded-xl shadow-md p-8 text-center">
+            <h1 className="text-2xl font-bold text-gray-900 mb-4">Session Not Found</h1>
+            <p className="text-gray-600 mb-6">
+              The session link you&apos;re trying to access doesn&apos;t exist or has expired.
+            </p>
+            <a
+              href="/dashboard"
+              className="inline-block px-6 py-3 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors font-medium"
+            >
+              Go to Dashboard
+            </a>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Fetch tutor and user data
+  let tutor = null
+  let tutorUser = null
+  if (videoSessionData.tutorId) {
+    const { data: tutorData } = await supabase
+      .from('tutor_profiles')
+      .select('*')
+      .eq('id', videoSessionData.tutorId)
+      .single()
+    
+    tutor = tutorData
+    
+    if (tutor?.userId) {
+      const { data: userData } = await supabase
+        .from('users')
+        .select('name, email')
+        .eq('id', tutor.userId)
+        .single()
+      tutorUser = userData
+    }
+  }
+
+  // Fetch booking and student data
+  let booking = null
+  let student = null
+  if (videoSessionData.bookingId) {
+    const { data: bookingData } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', videoSessionData.bookingId)
+      .single()
+    
+    booking = bookingData
+    
+    if (booking?.studentId) {
+      const { data: studentData } = await supabase
+        .from('users')
+        .select('name, email')
+        .eq('id', booking.studentId)
+        .single()
+      student = studentData
+    }
+  }
+
+  // Combine all data
+  const videoSession: any = {
+    ...videoSessionData,
+    tutor: tutor ? {
+      ...tutor,
+      user: tutorUser,
+    } : null,
+    booking: booking ? {
+      ...booking,
+      student: student,
+    } : null,
+  }
 
   if (!videoSession) {
     return (

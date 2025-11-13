@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Calendar, DollarSign, Clock, CreditCard, AlertCircle, CheckCircle } from 'lucide-react'
+import { formatCurrency, parseCurrencyCode, DEFAULT_CURRENCY, getCurrency } from '@/lib/currency'
 
 export default function PaymentForm({ booking }: any) {
   const router = useRouter()
@@ -41,7 +42,18 @@ export default function PaymentForm({ booking }: any) {
 
         if (!response.ok) {
           console.error('Payment initialization failed:', data)
-          setError(data.details || data.error || 'Failed to initialize payment')
+          let errorMsg = data.details || data.error || 'Failed to initialize payment'
+          
+          // Provide more specific error messages
+          if (data.error?.includes('PAYSTACK_SECRET_KEY')) {
+            errorMsg = 'Payment service is not configured. Please contact support.'
+          } else if (data.error?.includes('not found')) {
+            errorMsg = 'Booking not found. Please try creating a new booking.'
+          } else if (data.error?.includes('not pending')) {
+            errorMsg = 'This booking has already been paid or cancelled.'
+          }
+          
+          setError(errorMsg)
           setInitializing(false)
           return
         }
@@ -72,13 +84,13 @@ export default function PaymentForm({ booking }: any) {
           console.log('Constructed URL:', constructedUrl)
           // Clear any previous errors
           setError('')
-          setPaymentData({
+            setPaymentData({
             authorizationUrl: constructedUrl,
-            accessCode: data.accessCode,
-            reference: data.reference,
-          })
-          setInitializing(false)
-        } else {
+              accessCode: data.accessCode,
+              reference: data.reference,
+            })
+            setInitializing(false)
+          } else {
           console.error('❌ Invalid payment data received:', data)
           const errorMsg = data.error || data.details || 'Payment initialization incomplete. Please check server logs.'
           setError(errorMsg)
@@ -105,6 +117,7 @@ export default function PaymentForm({ booking }: any) {
 
     const paymentUrl = paymentData.authorizationUrl
     console.log('🔄 Redirecting to Paystack:', paymentUrl)
+    console.log('Payment reference:', paymentData.reference)
 
     // Validate URL
     if (!paymentUrl.startsWith('http://') && !paymentUrl.startsWith('https://')) {
@@ -112,6 +125,12 @@ export default function PaymentForm({ booking }: any) {
       setError('Invalid payment URL. Please refresh and try again.')
       setLoading(false)
       return
+    }
+
+    // Store reference in sessionStorage for verification after redirect
+    if (paymentData.reference) {
+      sessionStorage.setItem('paystack_reference', paymentData.reference)
+      sessionStorage.setItem('paystack_booking_id', booking.id)
     }
 
     // Try multiple methods to ensure redirect works
@@ -129,8 +148,14 @@ export default function PaymentForm({ booking }: any) {
       }, 1000)
     } catch (err) {
       console.error('Redirect error:', err)
+      setError('Failed to redirect to payment page. Please try clicking the link below.')
+      setLoading(false)
       // Method 2: Fallback - assign location
-      window.location.assign(paymentUrl)
+      try {
+        window.location.assign(paymentUrl)
+      } catch (fallbackErr) {
+        console.error('Fallback redirect also failed:', fallbackErr)
+      }
     }
   }
 
@@ -252,17 +277,18 @@ export default function PaymentForm({ booking }: any) {
                 Total:
               </span>
               <span className="text-pink-600">
-                ₵{(() => {
+                {(() => {
                   try {
+                    const currency = parseCurrencyCode(booking.currency)
                     // Calculate total for recurring bookings
                     if (booking.isRecurring && !booking.parentBookingId && booking.childBookings && Array.isArray(booking.childBookings)) {
                       const total = booking.price + booking.childBookings.reduce((sum: number, child: any) => sum + (child.price || 0), 0)
-                      return total.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                      return formatCurrency(total, currency)
                     }
-                    return booking.price.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                    return formatCurrency(booking.price, currency)
                   } catch (err) {
                     console.error('Error calculating total:', err)
-                    return booking.price.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                    return formatCurrency(booking.price, parseCurrencyCode(booking.currency))
                   }
                 })()}
               </span>
@@ -296,7 +322,7 @@ export default function PaymentForm({ booking }: any) {
               </p>
               <p className="text-xs text-blue-700">
                 Your payment will be processed securely through Paystack. You can pay with your card, bank account, or mobile money.
-              </p>
+          </p>
             </div>
           </div>
         </div>
@@ -324,17 +350,20 @@ export default function PaymentForm({ booking }: any) {
           ) : (
             <>
               <CreditCard className="h-5 w-5" />
-              Pay ₵{(() => {
+              Pay {(() => {
                 try {
+                  const currency = parseCurrencyCode(booking.currency)
+                  const currencySymbol = currency === 'GHS' ? '₵' : getCurrency(currency).symbol
                   // Calculate total for recurring bookings
+                  let total = booking.price
                   if (booking.isRecurring && !booking.parentBookingId && booking.childBookings && Array.isArray(booking.childBookings)) {
-                    const total = booking.price + booking.childBookings.reduce((sum: number, child: any) => sum + (child.price || 0), 0)
-                    return total.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                    total = booking.price + booking.childBookings.reduce((sum: number, child: any) => sum + (child.price || 0), 0)
                   }
-                  return booking.price.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                  return formatCurrency(total, currency)
                 } catch (err) {
                   console.error('Error calculating payment total:', err)
-                  return booking.price.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                  const currency = parseCurrencyCode(booking.currency)
+                  return formatCurrency(booking.price, currency)
                 }
               })()}
             </>
@@ -344,33 +373,33 @@ export default function PaymentForm({ booking }: any) {
         <p className="text-xs text-gray-500 text-center mt-4">
           By clicking &quot;Pay&quot;, you will be redirected to Paystack&apos;s secure payment page
         </p>
-
+        
         {paymentData?.authorizationUrl && (
           <div className="mt-4 pt-4 border-t space-y-3">
             <div className="flex flex-col gap-2">
-              <a
-                href={paymentData.authorizationUrl}
-                target="_blank"
-                rel="noopener noreferrer"
+            <a
+              href={paymentData.authorizationUrl}
+              target="_blank"
+              rel="noopener noreferrer"
                 onClick={(e) => {
                   e.preventDefault()
                   if (paymentData?.authorizationUrl) {
                     window.open(paymentData.authorizationUrl, '_blank', 'noopener,noreferrer')
                   }
                 }}
-                className="block w-full text-center text-sm text-pink-600 hover:text-pink-700 underline font-medium"
-              >
-                Or open payment page in a new tab
-              </a>
-              <button
-                type="button"
-                onClick={() => {
-                  if (paymentData?.authorizationUrl) {
-                    window.open(paymentData.authorizationUrl, '_blank')
-                  }
-                }}
+              className="block w-full text-center text-sm text-pink-600 hover:text-pink-700 underline font-medium"
+            >
+              Or open payment page in a new tab
+            </a>
+            <button
+              type="button"
+              onClick={() => {
+                if (paymentData?.authorizationUrl) {
+                  window.open(paymentData.authorizationUrl, '_blank')
+                }
+              }}
                 className="text-xs text-gray-600 hover:text-gray-800 underline"
-              >
+            >
                 Click here if redirect doesn&apos;t work
               </button>
             </div>
@@ -389,9 +418,9 @@ export default function PaymentForm({ booking }: any) {
                   className="mt-2 px-2 py-1 bg-gray-200 rounded text-xs"
                 >
                   Copy URL
-                </button>
-              </div>
-            )}
+            </button>
+          </div>
+        )}
           </div>
         )}
       </div>

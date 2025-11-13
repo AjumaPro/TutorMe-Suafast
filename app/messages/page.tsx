@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import Navbar from '@/components/Navbar'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import MessagesPageClient from '@/components/MessagesPageClient'
 
 export default async function MessagesPage() {
@@ -16,61 +16,85 @@ export default async function MessagesPage() {
   let conversations: any[] = []
 
   if (session.user.role === 'PARENT') {
-    const bookings = await prisma.booking.findMany({
-      where: {
-        studentId: session.user.id,
-      },
-      include: {
-        tutor: {
-          include: {
-            user: {
-              select: {
-                name: true,
-                email: true,
-                image: true,
-              },
-            },
-          },
-        },
-      },
-      distinct: ['tutorId'],
-    })
-
-    conversations = bookings.map((booking) => ({
-      id: booking.tutorId,
-      userId: booking.tutor.userId,
-      name: booking.tutor.user.name,
-      email: booking.tutor.user.email,
-      image: booking.tutor.user.image,
-      role: 'Tutor',
-    }))
+    const { data: bookingsData } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('studentId', session.user.id)
+    
+    const bookings = bookingsData || []
+    
+    // Get unique tutor IDs
+    const tutorIds = [...new Set(bookings.map(b => b.tutorId).filter(Boolean))]
+    
+    // Fetch tutor profiles and users
+    const tutorMap = new Map()
+    for (const tutorId of tutorIds) {
+      const { data: tutor } = await supabase
+        .from('tutor_profiles')
+        .select('*')
+        .eq('id', tutorId)
+        .single()
+      
+      if (tutor?.userId) {
+        const { data: tutorUser } = await supabase
+          .from('users')
+          .select('name, email, image')
+          .eq('id', tutor.userId)
+          .single()
+        
+        if (tutorUser) {
+          tutorMap.set(tutorId, {
+            id: tutorId,
+            userId: tutor.userId,
+            name: tutorUser.name,
+            email: tutorUser.email,
+            image: tutorUser.image,
+            role: 'Tutor',
+          })
+        }
+      }
+    }
+    
+    conversations = Array.from(tutorMap.values())
   } else if (session.user.role === 'TUTOR') {
-    const bookings = await prisma.booking.findMany({
-      where: {
-        tutor: {
-          userId: session.user.id,
-        },
-      },
-      include: {
-        student: {
-          select: {
-            name: true,
-            email: true,
-            image: true,
-          },
-        },
-      },
-      distinct: ['studentId'],
-    })
-
-    conversations = bookings.map((booking) => ({
-      id: booking.studentId,
-      userId: booking.studentId,
-      name: booking.student.name,
-      email: booking.student.email,
-      image: booking.student.image,
-      role: 'Student',
-    }))
+    // Get tutor profile first
+    const { data: tutorProfile } = await supabase
+      .from('tutor_profiles')
+      .select('*')
+      .eq('userId', session.user.id)
+      .single()
+    
+    if (tutorProfile) {
+      const { data: bookingsData } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('tutorId', tutorProfile.id)
+      
+      const bookings = bookingsData || []
+      
+      // Get unique student IDs
+      const studentIds = [...new Set(bookings.map(b => b.studentId).filter(Boolean))]
+      
+      // Fetch student users
+      for (const studentId of studentIds) {
+        const { data: student } = await supabase
+          .from('users')
+          .select('name, email, image')
+          .eq('id', studentId)
+          .single()
+        
+        if (student) {
+          conversations.push({
+            id: studentId,
+            userId: studentId,
+            name: student.name || 'Unknown Student',
+            email: student.email || '',
+            image: student.image || null,
+            role: 'Student',
+          })
+        }
+      }
+    }
   }
 
   return (

@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import Navbar from '@/components/Navbar'
 import DashboardSidebar from '@/components/DashboardSidebar'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import TutoringSchedule from '@/components/TutoringSchedule'
 import RecordedSessions from '@/components/RecordedSessions'
 import SummaryStats from '@/components/SummaryStats'
@@ -42,27 +42,47 @@ export default async function DashboardPage() {
   let notifications: any[] = []
 
   if (session.user.role === 'PARENT') {
-    allBookings = await prisma.booking.findMany({
-      where: {
-        studentId: session.user.id,
-      },
-      include: {
-        tutor: {
-          include: {
-            user: true,
-          },
-        },
-        videoSession: {
-          select: {
-            sessionToken: true,
-            status: true,
-          },
-        },
-      },
-      orderBy: {
-        scheduledAt: 'asc',
-      },
-    })
+    const { data: bookingsData } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('studentId', session.user.id)
+      .order('scheduledAt', { ascending: true })
+    
+    allBookings = bookingsData || []
+    
+    // Fetch related data
+    for (const booking of allBookings) {
+      if (booking.tutorId) {
+        const { data: tutor } = await supabase
+          .from('tutor_profiles')
+          .select('*')
+          .eq('id', booking.tutorId)
+          .single()
+        
+        if (tutor) {
+          booking.tutor = tutor
+          if (tutor.userId) {
+            const { data: tutorUser } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', tutor.userId)
+              .single()
+            booking.tutor.user = tutorUser || null
+          }
+        }
+      }
+      if (booking.id) {
+        const { data: videoSession } = await supabase
+          .from('video_sessions')
+          .select('*')
+          .eq('bookingId', booking.id)
+          .single()
+        booking.videoSession = videoSession ? {
+          sessionToken: videoSession.sessionToken,
+          status: videoSession.status,
+        } : null
+      }
+    }
 
     completedBookings = allBookings.filter((b) => b.status === 'COMPLETED')
     totalHours = Math.floor(
@@ -70,76 +90,120 @@ export default async function DashboardPage() {
     )
     totalMinutes = completedBookings.reduce((sum, b) => sum + b.duration, 0) % 60
 
-    // Fetch payments for parent
-    payments = await prisma.payment.findMany({
-      where: {
-        booking: {
-          studentId: session.user.id,
-        },
-      },
-      include: {
-        booking: {
-          include: {
-            tutor: {
-              include: {
-                user: {
-                  select: {
-                    name: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-      take: 10,
-    })
+    // Fetch payments for parent - get bookings first, then payments
+    const { data: parentBookings } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('studentId', session.user.id)
+    
+    const bookingIds = (parentBookings || []).map((b: any) => b.id)
+    if (bookingIds.length > 0) {
+      const { data: allPayments } = await supabase
+        .from('payments')
+        .select('*')
+        .order('createdAt', { ascending: false })
+        .limit(50)
+      
+      payments = (allPayments || [])
+        .filter((p: any) => bookingIds.includes(p.bookingId))
+        .slice(0, 10)
+        .map(async (p: any) => {
+          const { data: booking } = await supabase
+            .from('bookings')
+            .select('*')
+            .eq('id', p.bookingId)
+            .single()
+          
+          if (booking) {
+            p.booking = booking
+            if (booking.tutorId) {
+              const { data: tutor } = await supabase
+                .from('tutor_profiles')
+                .select('*')
+                .eq('id', booking.tutorId)
+                .single()
+              
+              if (tutor) {
+                p.booking.tutor = tutor
+                if (tutor.userId) {
+                  const { data: tutorUser } = await supabase
+                    .from('users')
+                    .select('*')
+                    .eq('id', tutor.userId)
+                    .single()
+                  p.booking.tutor.user = tutorUser ? { name: tutorUser.name } : null
+                }
+              }
+            }
+          }
+          return p
+        })
+      
+      payments = await Promise.all(payments)
+    }
 
     // Fetch notifications
-    notifications = await prisma.notification.findMany({
-      where: {
-        userId: session.user.id,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-      take: 10,
-    })
+    const { data: notificationsData } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('userId', session.user.id)
+      .order('createdAt', { ascending: false })
+      .limit(10)
+    
+    notifications = notificationsData || []
   } else if (session.user.role === 'TUTOR') {
-    tutorProfile = await prisma.tutorProfile.findUnique({
-      where: { userId: session.user.id },
-      include: {
-        user: true,
-      },
-    })
+    const { data: tutorProfileData } = await supabase
+      .from('tutor_profiles')
+      .select('*')
+      .eq('userId', session.user.id)
+      .single()
+    
+    tutorProfile = tutorProfileData || null
+    
+    if (tutorProfile && tutorProfile.userId) {
+      const { data: tutorUser } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', tutorProfile.userId)
+        .single()
+      tutorProfile.user = tutorUser || null
+    }
 
     // Only fetch bookings if tutor profile exists
     if (tutorProfile?.id) {
-      allBookings = await prisma.booking.findMany({
-        where: {
-          tutorId: tutorProfile.id,
-        },
-        include: {
-          student: {
-            select: {
-              name: true,
-              email: true,
-            },
-          },
-          videoSession: {
-            select: {
-              sessionToken: true,
-              status: true,
-            },
-          },
-        },
-        orderBy: {
-          scheduledAt: 'asc',
-        },
-      })
+      const { data: bookingsData } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('tutorId', tutorProfile.id)
+        .order('scheduledAt', { ascending: true })
+      
+      allBookings = bookingsData || []
+      
+      // Fetch related data
+      for (const booking of allBookings) {
+        if (booking.studentId) {
+          const { data: student } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', booking.studentId)
+            .single()
+          booking.student = student ? {
+            name: student.name,
+            email: student.email,
+          } : null
+        }
+        if (booking.id) {
+          const { data: videoSession } = await supabase
+            .from('video_sessions')
+            .select('*')
+            .eq('bookingId', booking.id)
+            .single()
+          booking.videoSession = videoSession ? {
+            sessionToken: videoSession.sessionToken,
+            status: videoSession.status,
+          } : null
+        }
+      }
     }
 
     completedBookings = allBookings.filter((b) => b.status === 'COMPLETED')
@@ -150,58 +214,79 @@ export default async function DashboardPage() {
 
     // Fetch payments for tutor
     if (tutorProfile?.id) {
-      payments = await prisma.payment.findMany({
-        where: {
-          booking: {
-            tutorId: tutorProfile.id,
-          },
-        },
-      include: {
-        booking: {
-          include: {
-            student: {
-              select: {
-                name: true,
-              },
-            },
-          },
-        },
-      },
-        orderBy: {
-          createdAt: 'desc',
-        },
-        take: 10,
-      })
+      // Get tutor bookings first
+      const { data: tutorBookings } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('tutorId', tutorProfile.id)
+      
+      const bookingIds = (tutorBookings || []).map((b: any) => b.id)
+      if (bookingIds.length > 0) {
+        const { data: allPayments } = await supabase
+          .from('payments')
+          .select('*')
+          .order('createdAt', { ascending: false })
+          .limit(50)
+        
+        payments = (allPayments || [])
+          .filter((p: any) => bookingIds.includes(p.bookingId))
+          .slice(0, 10)
+          .map(async (p: any) => {
+            const { data: booking } = await supabase
+              .from('bookings')
+              .select('*')
+              .eq('id', p.bookingId)
+              .single()
+            
+            if (booking && booking.studentId) {
+              const { data: student } = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', booking.studentId)
+                .single()
+              p.booking = {
+                ...booking,
+                student: student ? { name: student.name } : null,
+              }
+            }
+            return p
+          })
+        
+        payments = await Promise.all(payments)
+      }
 
       // Fetch reviews for tutor
-      reviews = await prisma.review.findMany({
-        where: {
-          tutorId: tutorProfile.id,
-        },
-      include: {
-        student: {
-          select: {
-            name: true,
-          },
-        },
-      },
-        orderBy: {
-          createdAt: 'desc',
-        },
-        take: 5,
-      })
+      const { data: reviewsData } = await supabase
+        .from('reviews')
+        .select('*')
+        .eq('tutorId', tutorProfile.id)
+        .order('createdAt', { ascending: false })
+        .limit(5)
+      
+      reviews = reviewsData || []
+      
+      // Fetch student names for reviews
+      for (const review of reviews) {
+        if (review.studentId) {
+          const { data: student } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', review.studentId)
+            .single()
+          review.student = student ? { name: student.name } : null
+        }
+      }
     }
 
     // Fetch notifications
-    notifications = await prisma.notification.findMany({
-      where: {
-        userId: session.user.id,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-      take: 10,
-    })
+    const { data: notificationsData } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('userId', session.user.id)
+      .order('createdAt', { ascending: false })
+      .limit(10)
+    
+    notifications = notificationsData || []
   }
 
   // Calculate weekly progress data from actual bookings
@@ -338,15 +423,22 @@ export default async function DashboardPage() {
       })),
     ...payments
       .filter((p) => p.status === 'PENDING')
-      .map((payment) => ({
-        id: `payment-reminder-${payment.id}`,
-        type: 'payment' as const,
-        title: 'Payment Pending',
-        description: `Complete payment for ${payment.booking?.subject || 'lesson'}`,
-        dueDate: new Date(payment.createdAt.getTime() + 24 * 60 * 60 * 1000), // 24 hours from creation
-        link: `/bookings/${payment.bookingId}/payment`,
-        priority: 'medium' as const,
-      })),
+      .map((payment) => {
+        // Convert createdAt string to Date if needed
+        const createdAt = payment.createdAt instanceof Date 
+          ? payment.createdAt 
+          : new Date(payment.createdAt)
+        
+        return {
+          id: `payment-reminder-${payment.id}`,
+          type: 'payment' as const,
+          title: 'Payment Pending',
+          description: `Complete payment for ${payment.booking?.subject || 'lesson'}`,
+          dueDate: new Date(createdAt.getTime() + 24 * 60 * 60 * 1000), // 24 hours from creation
+          link: `/bookings/${payment.bookingId}/payment`,
+          priority: 'medium' as const,
+        }
+      }),
   ]
 
   // Calculate earnings for tutors

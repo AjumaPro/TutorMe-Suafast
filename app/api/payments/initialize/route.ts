@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { getPaystackTransactionOptions } from '@/lib/paystack-config'
+import { parseCurrencyCode, toSmallestUnit, DEFAULT_CURRENCY } from '@/lib/currency'
+import crypto from 'crypto'
+
+function uuidv4() {
+  return crypto.randomUUID()
+}
 
 // Paystack initialization
 const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY || ''
@@ -34,33 +40,50 @@ export async function POST(request: Request) {
     }
 
     // Get booking
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      include: {
-        tutor: {
-          include: {
-            user: {
-              select: {
-                email: true,
-                name: true,
-              },
-            },
-          },
-        },
-        student: {
-          select: {
-            email: true,
-            name: true,
-          },
-        },
-      },
-    })
-
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', bookingId)
+      .single()
+    
     if (!booking) {
       return NextResponse.json(
         { error: 'Booking not found' },
         { status: 404 }
       )
+    }
+    
+    // Fetch tutor and user data
+    let tutor = null
+    let tutorUser = null
+    if (booking.tutorId) {
+      const { data: tutorData } = await supabase
+        .from('tutor_profiles')
+        .select('*')
+        .eq('id', booking.tutorId)
+        .single()
+      
+      tutor = tutorData
+      
+      if (tutor?.userId) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('email, name')
+          .eq('id', tutor.userId)
+          .single()
+        tutorUser = userData
+      }
+    }
+    
+    // Fetch student data
+    let student = null
+    if (booking.studentId) {
+      const { data: studentData } = await supabase
+        .from('users')
+        .select('email, name')
+        .eq('id', booking.studentId)
+        .single()
+      student = studentData
     }
 
     if (booking.studentId !== session.user.id) {
@@ -84,16 +107,16 @@ export async function POST(request: Request) {
     if (booking.isRecurring && !booking.parentBookingId) {
       // This is a parent recurring booking - get all child bookings
       try {
-        const childBookings = await prisma.booking.findMany({
-          where: { parentBookingId: booking.id },
-          select: { price: true },
-        })
+        const { data: childBookings } = await supabase
+          .from('bookings')
+          .select('price')
+          .eq('parentBookingId', booking.id)
         
-        totalBookings = 1 + childBookings.length
-        totalAmount = booking.price + childBookings.reduce((sum, child) => sum + child.price, 0)
+        totalBookings = 1 + (childBookings?.length || 0)
+        totalAmount = booking.price + (childBookings || []).reduce((sum: number, child: any) => sum + (child.price || 0), 0)
         
         console.log(`Recurring booking: ${totalBookings} lessons, total amount: ${totalAmount}`)
-        console.log(`Parent booking price: ${booking.price}, Child bookings: ${childBookings.length}`)
+        console.log(`Parent booking price: ${booking.price}, Child bookings: ${childBookings?.length || 0}`)
       } catch (error) {
         console.error('Error fetching child bookings:', error)
         // Continue with parent booking price only if there's an error
@@ -101,66 +124,92 @@ export async function POST(request: Request) {
       }
     }
 
+    // Get currency from booking or tutor profile (default to GHS)
+    const currency = parseCurrencyCode(booking.currency || tutor?.currency || DEFAULT_CURRENCY)
+
     // Calculate fees based on total amount
     const platformFee = totalAmount * PLATFORM_FEE_PERCENTAGE
     const tutorPayout = totalAmount - platformFee
 
     // Create or get payment record
-    let payment = await prisma.payment.findUnique({
-      where: { bookingId },
-    })
+    const { data: existingPayment } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('bookingId', bookingId)
+      .single()
+
+    let payment = existingPayment
 
     if (!payment) {
-      payment = await prisma.payment.create({
-        data: {
+      // Generate UUID for payment ID
+      const paymentId = uuidv4()
+      const now = new Date().toISOString()
+      
+      const { data: newPayment, error: createError } = await supabase
+        .from('payments')
+        .insert({
+          id: paymentId,
           bookingId: booking.id,
           amount: totalAmount, // Store total amount for recurring bookings
           platformFee,
           tutorPayout,
           status: 'PENDING',
-        },
-      })
+          currency: currency,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .select()
+        .single()
+      
+      if (createError) throw createError
+      payment = newPayment
     } else if (payment.amount !== totalAmount) {
       // Update payment amount if it changed (shouldn't happen, but just in case)
-      payment = await prisma.payment.update({
-        where: { id: payment.id },
-        data: {
+      const { data: updatedPayment, error: updateError } = await supabase
+        .from('payments')
+        .update({
           amount: totalAmount,
           platformFee,
           tutorPayout,
-        },
-      })
+          currency: currency,
+          updatedAt: new Date().toISOString(),
+        })
+        .eq('id', payment.id)
+        .select()
+        .single()
+      
+      if (updateError) throw updateError
+      payment = updatedPayment
     }
 
     // Generate unique reference
     const reference = `TUTORME_${booking.id}_${Date.now()}`
 
     // Initialize Paystack transaction
-    // Amount in pesewas (smallest currency unit for GHS)
-    // 1 GHS = 100 pesewas (similar to cents/kobo)
-    const amountInPesewas = Math.round(totalAmount * 100)
+    // Convert amount to smallest currency unit (pesewas for GHS, cents for USD, etc.)
+    const amountInSmallestUnit = toSmallestUnit(totalAmount, currency)
 
     try {
       // Get configured Paystack transaction options
       const transactionOptions = getPaystackTransactionOptions({
-        email: booking.student.email,
-        amount: amountInPesewas,
+        email: student?.email || session.user.email || '',
+        amount: amountInSmallestUnit,
         reference,
-        currency: 'GHS', // Ghana Cedis
+        currency: currency,
         metadata: {
           bookingId: booking.id,
           paymentId: payment.id,
-          studentName: booking.student.name,
-          tutorName: booking.tutor.user.name,
+          studentName: student?.name || 'Unknown Student',
+          tutorName: tutorUser?.name || 'Unknown Tutor',
           subject: booking.subject,
           lessonType: booking.lessonType,
-          scheduledAt: booking.scheduledAt.toISOString(),
+          scheduledAt: typeof booking.scheduledAt === 'string' ? booking.scheduledAt : new Date(booking.scheduledAt).toISOString(),
           duration: booking.duration.toString(),
           isRecurring: booking.isRecurring ? 'true' : 'false',
           totalBookings: totalBookings.toString(),
           totalAmount: totalAmount.toString(),
         },
-        callbackUrl: `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/bookings/${booking.id}?payment=success`,
+        callbackUrl: `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/bookings/${booking.id}?payment=success&reference=${reference}`,
       })
 
       console.log('Initializing Paystack transaction with options:', {
@@ -233,12 +282,13 @@ export async function POST(request: Request) {
       }
 
       // Update payment with reference
-      await prisma.payment.update({
-        where: { id: payment.id },
-        data: {
+      await supabase
+        .from('payments')
+        .update({
           paystackReference: reference,
-        },
-      })
+          updatedAt: new Date().toISOString(),
+        })
+        .eq('id', payment.id)
 
       return NextResponse.json({
         reference,

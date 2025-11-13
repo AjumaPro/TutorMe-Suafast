@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
+import crypto from 'crypto'
+
+function uuidv4() {
+  return crypto.randomUUID()
+}
 
 const progressEntrySchema = z.object({
   studentId: z.string(),
@@ -31,9 +36,11 @@ export async function POST(request: Request) {
 
     // Verify student belongs to tutor or is the student themselves
     if (session.user.role === 'TUTOR') {
-      const tutorProfile = await prisma.tutorProfile.findUnique({
-        where: { userId: session.user.id },
-      })
+      const { data: tutorProfile } = await supabase
+        .from('tutor_profiles')
+        .select('*')
+        .eq('userId', session.user.id)
+        .single()
 
       if (!tutorProfile || validatedData.tutorId !== tutorProfile.id) {
         return NextResponse.json(
@@ -44,9 +51,11 @@ export async function POST(request: Request) {
 
       // Verify booking belongs to tutor if provided
       if (validatedData.bookingId) {
-        const booking = await prisma.booking.findUnique({
-          where: { id: validatedData.bookingId },
-        })
+        const { data: booking } = await supabase
+          .from('bookings')
+          .select('*')
+          .eq('id', validatedData.bookingId)
+          .single()
 
         if (!booking || booking.tutorId !== tutorProfile.id) {
           return NextResponse.json(
@@ -64,8 +73,11 @@ export async function POST(request: Request) {
       }
     }
 
-    const progressEntry = await prisma.progressEntry.create({
-      data: {
+    const now = new Date().toISOString()
+    const { data: progressEntry, error: createError } = await supabase
+      .from('progress_entries')
+      .insert({
+        id: uuidv4(),
         studentId: validatedData.studentId,
         tutorId: validatedData.tutorId,
         bookingId: validatedData.bookingId,
@@ -74,15 +86,23 @@ export async function POST(request: Request) {
         score: validatedData.score,
         notes: validatedData.notes,
         milestone: validatedData.milestone,
-      },
-      include: {
-        student: {
-          select: {
-            name: true,
-          },
-        },
-      },
-    })
+        createdAt: now,
+        updatedAt: now,
+      })
+      .select()
+      .single()
+
+    if (createError) throw createError
+
+    // Fetch student data
+    if (progressEntry.studentId) {
+      const { data: student } = await supabase
+        .from('users')
+        .select('name')
+        .eq('id', progressEntry.studentId)
+        .single()
+      progressEntry.student = student || null
+    }
 
     // Create notification for student
     if (session.user.role === 'TUTOR') {
@@ -130,40 +150,48 @@ export async function GET(request: Request) {
     const studentId = searchParams.get('studentId')
     const subject = searchParams.get('subject')
 
-    const where: any = {}
+    let query = supabase
+      .from('progress_entries')
+      .select('*')
 
     if (session.user.role === 'PARENT') {
-      where.studentId = session.user.id
+      query = query.eq('studentId', session.user.id)
     } else if (session.user.role === 'TUTOR') {
-      const tutorProfile = await prisma.tutorProfile.findUnique({
-        where: { userId: session.user.id },
-      })
+      const { data: tutorProfile } = await supabase
+        .from('tutor_profiles')
+        .select('id')
+        .eq('userId', session.user.id)
+        .single()
+      
       if (tutorProfile) {
-        where.tutorId = tutorProfile.id
+        query = query.eq('tutorId', tutorProfile.id)
       } else {
         return NextResponse.json({ progressEntries: [] })
       }
     }
 
     if (studentId) {
-      where.studentId = studentId
+      query = query.eq('studentId', studentId)
     }
 
     if (subject) {
-      where.subject = subject
+      query = query.eq('subject', subject)
     }
 
-    const progressEntries = await prisma.progressEntry.findMany({
-      where,
-      include: {
-        student: {
-          select: {
-            name: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    })
+    const { data: progressEntriesData } = await query.order('createdAt', { ascending: false })
+    const progressEntries = progressEntriesData || []
+
+    // Fetch student data for each entry
+    for (const entry of progressEntries) {
+      if (entry.studentId) {
+        const { data: student } = await supabase
+          .from('users')
+          .select('name')
+          .eq('id', entry.studentId)
+          .single()
+        entry.student = student || null
+      }
+    }
 
     // Calculate statistics
     const stats = {

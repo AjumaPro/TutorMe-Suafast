@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
 import crypto from 'crypto'
 
@@ -21,9 +21,11 @@ export async function POST(request: Request) {
     const email = validatedData.email.toLowerCase().trim()
 
     // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email }
-    })
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .single()
 
     if (existingUser) {
       return NextResponse.json(
@@ -40,18 +42,24 @@ export async function POST(request: Request) {
     const verificationTokenExpiry = new Date(Date.now() + 24 * 3600000) // 24 hours
 
     // Create user
-    const user = await prisma.user.create({
-      data: {
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .insert({
         email,
         password: hashedPassword,
         name: validatedData.name.trim(),
         role: validatedData.role || 'PARENT',
         phone: validatedData.phone?.trim() || null,
         resetToken: verificationToken, // Using resetToken field for verification
-        resetTokenExpiry: verificationTokenExpiry,
+        resetTokenExpiry: verificationTokenExpiry.toISOString(),
         emailVerified: null, // Will be set when email is verified
-      }
-    })
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .select()
+      .single()
+    
+    if (userError) throw userError
 
     // In production, send verification email here
     if (process.env.NODE_ENV === 'development') {
@@ -61,15 +69,19 @@ export async function POST(request: Request) {
 
     // If tutor, create tutor profile
     if (user.role === 'TUTOR') {
-      await prisma.tutorProfile.create({
-        data: {
+      await supabase
+        .from('tutor_profiles')
+        .insert({
           userId: user.id,
           hourlyRate: 0, // Will be set later
           isApproved: false,
           subjects: '[]', // Empty array as JSON string
           grades: '[]', // Empty array as JSON string
-        }
-      })
+          rating: 0,
+          totalReviews: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
     }
 
     return NextResponse.json(

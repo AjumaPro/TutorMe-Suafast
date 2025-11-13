@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Lock, Key, Shield, Smartphone, CheckCircle, XCircle, Eye, EyeOff, Mail } from 'lucide-react'
+import TwoFactorSetup from './TwoFactorSetup'
 
 export default function SecuritySettings() {
   const [currentPassword, setCurrentPassword] = useState('')
@@ -11,10 +12,18 @@ export default function SecuritySettings() {
   const [showNewPassword, setShowNewPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false)
+  const [twoFactorMethod, setTwoFactorMethod] = useState<string | null>(null)
+  const [show2FASetup, setShow2FASetup] = useState(false)
+  const [showDisable2FA, setShowDisable2FA] = useState(false)
+  const [disablePassword, setDisablePassword] = useState('')
   const [emailVerified, setEmailVerified] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+
+  useEffect(() => {
+    fetch2FAStatus()
+  }, [])
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -67,22 +76,64 @@ export default function SecuritySettings() {
     }
   }
 
-  const handleToggle2FA = async () => {
-    setLoading(true)
+  const fetch2FAStatus = async () => {
     try {
-      const response = await fetch('/api/settings/two-factor', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !twoFactorEnabled }),
-      })
-
+      const response = await fetch('/api/settings')
       if (response.ok) {
-        setTwoFactorEnabled(!twoFactorEnabled)
-        setSuccess(twoFactorEnabled ? 'Two-factor authentication disabled' : 'Two-factor authentication enabled')
-        setTimeout(() => setSuccess(''), 3000)
+        const data = await response.json()
+        setTwoFactorEnabled(data.user?.twoFactorEnabled || false)
+        setTwoFactorMethod(data.user?.twoFactorMethod || null)
+        setEmailVerified(!!data.user?.emailVerified)
       }
     } catch (err) {
-      setError('Failed to update two-factor authentication')
+      console.error('Failed to fetch 2FA status:', err)
+    }
+  }
+
+  const handleEnable2FA = () => {
+    setShow2FASetup(true)
+    setError('')
+    setSuccess('')
+  }
+
+  const handle2FASetupComplete = () => {
+    setShow2FASetup(false)
+    fetch2FAStatus()
+    setSuccess('Two-factor authentication enabled successfully!')
+    setTimeout(() => setSuccess(''), 5000)
+  }
+
+  const handleDisable2FA = async () => {
+    if (!disablePassword) {
+      setError('Password is required to disable 2FA')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+
+    try {
+      const response = await fetch('/api/auth/two-factor/disable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: disablePassword }),
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        setError(result.error || 'Failed to disable 2FA')
+        return
+      }
+
+      setTwoFactorEnabled(false)
+      setTwoFactorMethod(null)
+      setShowDisable2FA(false)
+      setDisablePassword('')
+      setSuccess('Two-factor authentication disabled successfully')
+      setTimeout(() => setSuccess(''), 3000)
+    } catch (err) {
+      setError('An error occurred. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -251,35 +302,107 @@ export default function SecuritySettings() {
       </div>
 
       {/* Two-Factor Authentication */}
-      <div className="border border-gray-200 rounded-lg p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Smartphone className="h-5 w-5 text-gray-600" />
-            <div>
-              <h3 className="font-semibold text-gray-800">Two-Factor Authentication</h3>
-              <p className="text-sm text-gray-600">Add an extra layer of security to your account</p>
-            </div>
-          </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={twoFactorEnabled}
-              onChange={handleToggle2FA}
-              disabled={loading}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-pink-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-pink-600"></div>
-          </label>
+      {show2FASetup ? (
+        <div className="border border-gray-200 rounded-lg p-6">
+          <TwoFactorSetup
+            onComplete={handle2FASetupComplete}
+            onCancel={() => setShow2FASetup(false)}
+          />
         </div>
-        {twoFactorEnabled && (
-          <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-            <p className="text-sm text-green-800">
-              <CheckCircle className="h-4 w-4 inline mr-1" />
-              Two-factor authentication is enabled. You&apos;ll be asked for a verification code when signing in.
+      ) : showDisable2FA ? (
+        <div className="border border-gray-200 rounded-lg p-6">
+          <div className="mb-4">
+            <h3 className="font-semibold text-gray-800 mb-2">Disable Two-Factor Authentication</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Enter your password to disable two-factor authentication
             </p>
           </div>
-        )}
-      </div>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Password
+              </label>
+              <input
+                type="password"
+                value={disablePassword}
+                onChange={(e) => setDisablePassword(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                placeholder="Enter your password"
+                required
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleDisable2FA}
+                disabled={loading || !disablePassword}
+                className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium"
+              >
+                {loading ? 'Disabling...' : 'Disable 2FA'}
+              </button>
+              <button
+                onClick={() => {
+                  setShowDisable2FA(false)
+                  setDisablePassword('')
+                  setError('')
+                }}
+                disabled={loading}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="border border-gray-200 rounded-lg p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Smartphone className="h-5 w-5 text-gray-600" />
+              <div>
+                <h3 className="font-semibold text-gray-800">Two-Factor Authentication</h3>
+                <p className="text-sm text-gray-600">Add an extra layer of security to your account</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {twoFactorEnabled ? (
+                <span className="flex items-center gap-1 text-green-600 text-sm">
+                  <CheckCircle className="h-4 w-4" />
+                  Enabled ({twoFactorMethod})
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-gray-500 text-sm">
+                  <XCircle className="h-4 w-4" />
+                  Disabled
+                </span>
+              )}
+            </div>
+          </div>
+          {twoFactorEnabled ? (
+            <div className="space-y-4">
+              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-sm text-green-800">
+                  <CheckCircle className="h-4 w-4 inline mr-1" />
+                  Two-factor authentication is enabled using {twoFactorMethod === 'TOTP' ? 'Authenticator App' : twoFactorMethod === 'EMAIL' ? 'Email' : 'SMS'}.
+                  You&apos;ll be asked for a verification code when signing in.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowDisable2FA(true)}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium"
+              >
+                Disable Two-Factor Authentication
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleEnable2FA}
+              className="px-6 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 font-medium"
+            >
+              Enable Two-Factor Authentication
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Security Recommendations */}
       <div className="border border-blue-200 bg-blue-50 rounded-lg p-6">

@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
+import crypto from 'crypto'
+
+function uuidv4() {
+  return crypto.randomUUID()
+}
 
 const reviewSchema = z.object({
   bookingId: z.string(),
@@ -25,20 +30,39 @@ export async function POST(request: Request) {
     const validatedData = reviewSchema.parse(body)
 
     // Verify booking exists and belongs to the student
-    const booking = await prisma.booking.findUnique({
-      where: { id: validatedData.bookingId },
-      include: {
-        tutor: true,
-        review: true,
-      },
-    })
-
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', validatedData.bookingId)
+      .single()
+    
     if (!booking) {
       return NextResponse.json(
         { error: 'Booking not found' },
         { status: 404 }
       )
     }
+    
+    // Fetch tutor
+    let tutor = null
+    if (booking.tutorId) {
+      const { data: tutorData } = await supabase
+        .from('tutor_profiles')
+        .select('*')
+        .eq('id', booking.tutorId)
+        .single()
+      tutor = tutorData
+    }
+    
+    // Fetch existing review
+    const { data: existingReview } = await supabase
+      .from('reviews')
+      .select('*')
+      .eq('bookingId', validatedData.bookingId)
+      .single()
+    
+    booking.tutor = tutor
+    booking.review = existingReview || null
 
     if (booking.studentId !== session.user.id) {
       return NextResponse.json(
@@ -62,38 +86,53 @@ export async function POST(request: Request) {
     }
 
     // Create review
-    const review = await prisma.review.create({
-      data: {
+    const reviewId = uuidv4()
+    const now = new Date().toISOString()
+    
+    const { data: review, error: reviewError } = await supabase
+      .from('reviews')
+      .insert({
+        id: reviewId,
         bookingId: validatedData.bookingId,
         studentId: session.user.id,
         tutorId: booking.tutorId,
         rating: validatedData.rating,
-        comment: validatedData.comment,
-      },
-      include: {
-        student: {
-          select: {
-            name: true,
-            image: true,
-          },
-        },
-      },
-    })
+        comment: validatedData.comment || null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .select()
+      .single()
+    
+    if (reviewError) throw reviewError
+    
+    // Fetch student data
+    const { data: student } = await supabase
+      .from('users')
+      .select('name, image')
+      .eq('id', session.user.id)
+      .single()
+    
+    review.student = student || null
 
     // Update tutor rating
-    const tutorReviews = await prisma.review.findMany({
-      where: { tutorId: booking.tutorId },
-    })
+    const { data: tutorReviews } = await supabase
+      .from('reviews')
+      .select('rating')
+      .eq('tutorId', booking.tutorId)
 
-    const averageRating = tutorReviews.reduce((sum, r) => sum + r.rating, 0) / tutorReviews.length
+    const averageRating = tutorReviews && tutorReviews.length > 0
+      ? tutorReviews.reduce((sum: number, r: any) => sum + r.rating, 0) / tutorReviews.length
+      : 0
 
-    await prisma.tutorProfile.update({
-      where: { id: booking.tutorId },
-      data: {
+    await supabase
+      .from('tutor_profiles')
+      .update({
         rating: averageRating,
-        totalReviews: tutorReviews.length,
-      },
-    })
+        totalReviews: tutorReviews?.length || 0,
+        updatedAt: now,
+      })
+      .eq('id', booking.tutorId)
 
     return NextResponse.json(
       { message: 'Review submitted successfully', review },
@@ -127,30 +166,37 @@ export async function GET(request: Request) {
       )
     }
 
-    const where: any = {}
-    if (tutorId) where.tutorId = tutorId
-    if (bookingId) where.bookingId = bookingId
+    let query = supabase
+      .from('reviews')
+      .select('*')
+      .order('createdAt', { ascending: false })
+    
+    if (tutorId) query = query.eq('tutorId', tutorId)
+    if (bookingId) query = query.eq('bookingId', bookingId)
 
-    const reviews = await prisma.review.findMany({
-      where,
-      include: {
-        student: {
-          select: {
-            name: true,
-            image: true,
-          },
-        },
-        booking: {
-          select: {
-            subject: true,
-            scheduledAt: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    })
+    const { data: reviewsData } = await query
+    const reviews = reviewsData || []
+    
+    // Fetch related student and booking data
+    for (const review of reviews) {
+      if (review.studentId) {
+        const { data: student } = await supabase
+          .from('users')
+          .select('name, image')
+          .eq('id', review.studentId)
+          .single()
+        review.student = student || null
+      }
+      
+      if (review.bookingId) {
+        const { data: booking } = await supabase
+          .from('bookings')
+          .select('subject, scheduledAt')
+          .eq('id', review.bookingId)
+          .single()
+        review.booking = booking || null
+      }
+    }
 
     return NextResponse.json({ reviews })
   } catch (error) {

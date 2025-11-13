@@ -1,15 +1,12 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
-import Stripe from 'stripe'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2023-10-16',
-})
-
-const PLATFORM_FEE_PERCENTAGE = 0.15 // 15% commission
-
+/**
+ * This endpoint is deprecated - we use Paystack instead of Stripe
+ * All payment initialization should use /api/payments/initialize
+ * This file is kept for backward compatibility but redirects to Paystack flow
+ */
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions)
@@ -30,70 +27,15 @@ export async function POST(request: Request) {
       )
     }
 
-    // Get booking
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      include: {
-        tutor: true,
+    // Redirect to Paystack payment initialization
+    // This endpoint is deprecated - use /api/payments/initialize instead
+    return NextResponse.json(
+      { 
+        error: 'This endpoint is deprecated. Please use /api/payments/initialize for Paystack payments.',
+        redirectTo: `/api/payments/initialize`
       },
-    })
-
-    if (!booking) {
-      return NextResponse.json(
-        { error: 'Booking not found' },
-        { status: 404 }
-      )
-    }
-
-    if (booking.studentId !== session.user.id) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
-    }
-
-    if (booking.status !== 'PENDING') {
-      return NextResponse.json(
-        { error: 'Booking is not pending payment' },
-        { status: 400 }
-      )
-    }
-
-    // Calculate fees
-    const platformFee = booking.price * PLATFORM_FEE_PERCENTAGE
-    const tutorPayout = booking.price - platformFee
-
-    // Create or get payment record
-    let payment = await prisma.payment.findUnique({
-      where: { bookingId },
-    })
-
-    if (!payment) {
-      payment = await prisma.payment.create({
-        data: {
-          bookingId: booking.id,
-          amount: booking.price,
-          platformFee,
-          tutorPayout,
-          status: 'PENDING',
-        },
-      })
-    }
-
-    // Create Stripe Payment Intent
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(booking.price * 100), // Convert to cents
-      currency: 'usd',
-      metadata: {
-        bookingId: booking.id,
-        paymentId: payment.id,
-      },
-    })
-
-    return NextResponse.json({
-      clientSecret: paymentIntent.client_secret,
-      paymentId: payment.id,
-    })
+      { status: 410 } // 410 Gone - indicates resource is no longer available
+    )
   } catch (error) {
     console.error('Payment intent creation error:', error)
     return NextResponse.json(
@@ -102,4 +44,3 @@ export async function POST(request: Request) {
     )
   }
 }
-

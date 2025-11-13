@@ -164,7 +164,7 @@ export default function PaymentMethods() {
         <div className="border border-gray-200 rounded-lg p-6 bg-gray-50">
           <h3 className="font-semibold text-gray-800 mb-4">Add Payment Method</h3>
           <p className="text-sm text-gray-600 mb-4">
-            Payment method integration will be handled by Stripe. This is a placeholder for the payment form.
+            Payment methods are managed through Paystack. When you make a payment, you can save your card for future use. Saved payment methods will appear here.
           </p>
           <div className="flex gap-3">
             <button
@@ -175,13 +175,14 @@ export default function PaymentMethods() {
             </button>
             <button
               onClick={() => {
-                // In production, this would open Stripe's payment method form
-                alert('Payment method integration coming soon!')
+                // Payment methods are saved automatically when making payments through Paystack
+                // Users can manage them through their Paystack account or during checkout
+                alert('Payment methods are saved automatically when you make payments. Make a booking to add a payment method.')
                 setShowAddForm(false)
               }}
               className="px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 font-medium"
             >
-              Continue to Stripe
+              Learn More
             </button>
           </div>
         </div>

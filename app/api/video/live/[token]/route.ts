@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 
 // Get live session info by token (for students to join)
 export async function GET(
@@ -9,32 +9,11 @@ export async function GET(
   try {
     const { token } = await params
 
-    const videoSession = await prisma.videoSession.findUnique({
-      where: { sessionToken: token },
-      include: {
-        tutor: {
-          include: {
-            user: {
-              select: {
-                name: true,
-                email: true,
-                image: true,
-              },
-            },
-          },
-        },
-        booking: {
-          include: {
-            student: {
-              select: {
-                name: true,
-                email: true,
-              },
-            },
-          },
-        },
-      },
-    })
+    const { data: videoSession } = await supabase
+      .from('video_sessions')
+      .select('*')
+      .eq('sessionToken', token)
+      .single()
 
     if (!videoSession) {
       return NextResponse.json(
@@ -50,15 +29,55 @@ export async function GET(
       )
     }
 
+    // Fetch tutor and user data
+    let tutor = null
+    let tutorUser = null
+    if (videoSession.tutorId) {
+      const { data: tutorData } = await supabase
+        .from('tutor_profiles')
+        .select('*')
+        .eq('id', videoSession.tutorId)
+        .single()
+      tutor = tutorData
+
+      if (tutor?.userId) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('name, email, image')
+          .eq('id', tutor.userId)
+          .single()
+        tutorUser = userData
+      }
+    }
+
+    // Fetch booking and student data
+    let student = null
+    if (videoSession.bookingId) {
+      const { data: booking } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('id', videoSession.bookingId)
+        .single()
+
+      if (booking?.studentId) {
+        const { data: studentData } = await supabase
+          .from('users')
+          .select('name, email')
+          .eq('id', booking.studentId)
+          .single()
+        student = studentData
+      }
+    }
+
     return NextResponse.json({
       sessionId: videoSession.id,
       sessionToken: videoSession.sessionToken,
       subject: videoSession.subject,
-      tutor: videoSession.tutor
+      tutor: tutorUser
         ? {
-            name: videoSession.tutor.user.name,
-            email: videoSession.tutor.user.email,
-            image: videoSession.tutor.user.image,
+            name: tutorUser.name,
+            email: tutorUser.email,
+            image: tutorUser.image,
           }
         : null,
       startedAt: videoSession.startedAt,

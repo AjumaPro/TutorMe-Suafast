@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
+
+function uuidv4() {
+  return crypto.randomUUID()
+}
 
 const joinGroupClassSchema = z.object({
   groupClassId: z.string(),
@@ -24,86 +28,90 @@ export async function GET(request: Request) {
     }
 
     // Find group classes for this tutor
-    const whereClause: any = {
-      tutorId,
-      isGroupClass: true,
-      status: {
-        not: 'CANCELLED',
-      },
-      scheduledAt: {
-        gte: new Date(), // Only future classes
-      },
-    }
+    let query = supabase
+      .from('bookings')
+      .select('*')
+      .eq('tutorId', tutorId)
+      .eq('isGroupClass', true)
+      .neq('status', 'CANCELLED')
+      .gte('scheduledAt', new Date().toISOString())
+      .order('scheduledAt', { ascending: true })
 
     if (subject) {
-      whereClause.subject = subject
+      query = query.eq('subject', subject)
     }
 
     if (scheduledAt) {
       const targetDate = new Date(scheduledAt)
       const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0))
       const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999))
-      whereClause.scheduledAt = {
-        gte: startOfDay,
-        lte: endOfDay,
-      }
+      query = query.gte('scheduledAt', startOfDay.toISOString())
+      query = query.lte('scheduledAt', endOfDay.toISOString())
     }
 
-    // Get all group class bookings
-    const allGroupBookings = await prisma.booking.findMany({
-      where: {
-        ...whereClause,
-        isGroupClass: true,
-      },
-      include: {
-        student: {
-          select: {
-            name: true,
-            email: true,
-            image: true,
-          },
-        },
-        tutor: {
-          include: {
-            user: {
-              select: {
-                name: true,
-                email: true,
-                image: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: {
-        scheduledAt: 'asc',
-      },
-    })
+    const { data: allGroupBookingsData } = await query
+    const allGroupBookings = allGroupBookingsData || []
 
-    // Filter to get only parent group classes (where groupClassId equals id)
-    const parentGroupClasses = allGroupBookings.filter(
+    // Fetch related data
+    const allGroupBookingsWithRelations = await Promise.all(
+      allGroupBookings.map(async (booking) => {
+        let student = null
+        if (booking.studentId) {
+          const { data: studentData } = await supabase
+            .from('users')
+            .select('name, email, image')
+            .eq('id', booking.studentId)
+            .single()
+          student = studentData
+        }
+
+        let tutor = null
+        let tutorUser = null
+        if (booking.tutorId) {
+          const { data: tutorData } = await supabase
+            .from('tutor_profiles')
+            .select('*')
+            .eq('id', booking.tutorId)
+            .single()
+          tutor = tutorData
+
+          if (tutor?.userId) {
+            const { data: userData } = await supabase
+              .from('users')
+              .select('name, email, image')
+              .eq('id', tutor.userId)
+              .single()
+            tutorUser = userData
+          }
+        }
+
+        return {
+          ...booking,
+          student,
+          tutor: tutor ? { ...tutor, user: tutorUser } : null,
+        }
+      })
+    )
+
+    // Filter to get only parent group classes (where groupClassId equals id or is null)
+    const parentGroupClasses = allGroupBookingsWithRelations.filter(
       (booking) => booking.groupClassId === booking.id || booking.groupClassId === null
     )
 
     // For each group class, count current participants
     const groupClassesWithCount = await Promise.all(
       parentGroupClasses.map(async (groupClass) => {
-        const participantCount = await prisma.booking.count({
-          where: {
-            OR: [
-              { id: groupClass.id }, // The parent booking itself
-              { groupClassId: groupClass.id }, // All bookings that joined this group
-            ],
-            status: {
-              not: 'CANCELLED',
-            },
-          },
-        })
+        // Count bookings that are either the parent or joined this group
+        const { count: participantCount } = await supabase
+          .from('bookings')
+          .select('*', { count: 'exact', head: true })
+          .or(`id.eq.${groupClass.id},groupClassId.eq.${groupClass.id}`)
+          .neq('status', 'CANCELLED')
 
         return {
           ...groupClass,
-          currentParticipants: participantCount,
-          availableSpots: groupClass.maxParticipants - participantCount,
+          currentParticipants: participantCount || 0,
+          availableSpots: (groupClass.maxParticipants || 0) - (participantCount || 0),
         }
       })
     )
@@ -139,12 +147,11 @@ export async function POST(request: Request) {
     const validatedData = joinGroupClassSchema.parse(body)
 
     // Get the parent group class
-    const parentGroupClass = await prisma.booking.findUnique({
-      where: { id: validatedData.groupClassId },
-      include: {
-        tutor: true,
-      },
-    })
+    const { data: parentGroupClass } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', validatedData.groupClassId)
+      .single()
 
     if (!parentGroupClass || !parentGroupClass.isGroupClass) {
       return NextResponse.json(
@@ -153,20 +160,25 @@ export async function POST(request: Request) {
       )
     }
 
-    // Check if class is full
-    const participantCount = await prisma.booking.count({
-      where: {
-        OR: [
-          { id: parentGroupClass.id },
-          { groupClassId: parentGroupClass.id },
-        ],
-        status: {
-          not: 'CANCELLED',
-        },
-      },
-    })
+    // Fetch tutor data
+    let tutor = null
+    if (parentGroupClass.tutorId) {
+      const { data: tutorData } = await supabase
+        .from('tutor_profiles')
+        .select('*')
+        .eq('id', parentGroupClass.tutorId)
+        .single()
+      tutor = tutorData
+    }
 
-    if (participantCount >= parentGroupClass.maxParticipants) {
+    // Check if class is full
+    const { count: participantCount } = await supabase
+      .from('bookings')
+      .select('*', { count: 'exact', head: true })
+      .or(`id.eq.${parentGroupClass.id},groupClassId.eq.${parentGroupClass.id}`)
+      .neq('status', 'CANCELLED')
+
+    if ((participantCount || 0) >= (parentGroupClass.maxParticipants || 0)) {
       return NextResponse.json(
         { error: 'Group class is full' },
         { status: 400 }
@@ -174,20 +186,14 @@ export async function POST(request: Request) {
     }
 
     // Check if user already joined this group class
-    const existingBooking = await prisma.booking.findFirst({
-      where: {
-        studentId: session.user.id,
-        OR: [
-          { id: parentGroupClass.id },
-          { groupClassId: parentGroupClass.id },
-        ],
-        status: {
-          not: 'CANCELLED',
-        },
-      },
-    })
+    const { data: existingBookings } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('studentId', session.user.id)
+      .or(`id.eq.${parentGroupClass.id},groupClassId.eq.${parentGroupClass.id}`)
+      .neq('status', 'CANCELLED')
 
-    if (existingBooking) {
+    if (existingBookings && existingBookings.length > 0) {
       return NextResponse.json(
         { error: 'You have already joined this group class' },
         { status: 400 }
@@ -195,23 +201,40 @@ export async function POST(request: Request) {
     }
 
     // Create a booking that joins the group class
-    const booking = await prisma.booking.create({
-      data: {
-        studentId: session.user.id,
-        tutorId: parentGroupClass.tutorId,
-        subject: parentGroupClass.subject,
-        lessonType: parentGroupClass.lessonType,
-        scheduledAt: parentGroupClass.scheduledAt,
-        duration: parentGroupClass.duration,
-        price: parentGroupClass.price,
-        addressId: parentGroupClass.addressId,
-        notes: parentGroupClass.notes,
-        status: 'PENDING',
-        isGroupClass: true,
-        groupClassId: parentGroupClass.id,
-        maxParticipants: parentGroupClass.maxParticipants,
-      },
-    })
+    const bookingId = uuidv4()
+    const bookingData = {
+      id: bookingId,
+      studentId: session.user.id,
+      tutorId: parentGroupClass.tutorId,
+      subject: parentGroupClass.subject,
+      lessonType: parentGroupClass.lessonType,
+      scheduledAt: parentGroupClass.scheduledAt,
+      duration: parentGroupClass.duration,
+      price: parentGroupClass.price,
+      currency: parentGroupClass.currency || 'GHS',
+      addressId: parentGroupClass.addressId,
+      notes: parentGroupClass.notes,
+      status: 'PENDING',
+      isGroupClass: true,
+      groupClassId: parentGroupClass.id,
+      maxParticipants: parentGroupClass.maxParticipants,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+
+    const { data: booking, error: bookingError } = await supabase
+      .from('bookings')
+      .insert(bookingData)
+      .select()
+      .single()
+
+    if (bookingError || !booking) {
+      console.error('Error creating booking:', bookingError)
+      return NextResponse.json(
+        { error: 'Failed to join group class' },
+        { status: 500 }
+      )
+    }
 
     return NextResponse.json(
       { message: 'Successfully joined group class', booking },

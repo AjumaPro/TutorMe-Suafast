@@ -6,6 +6,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Calendar, Clock, Repeat, DollarSign } from 'lucide-react'
+import { formatCurrency, parseCurrencyCode } from '@/lib/currency'
 
 const recurringBookingSchema = z.object({
   subject: z.string().min(1, 'Subject is required'),
@@ -389,7 +390,9 @@ export default function RecurringBookingForm({
             </div>
             <div className="flex justify-between">
               <span className="text-gray-600">Rate:</span>
-              <span className="font-medium">${tutor.hourlyRate}/hour</span>
+              <span className="font-medium">
+                {formatCurrency(tutor.hourlyRate, parseCurrencyCode(tutor.currency))}/hour
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-600">Duration:</span>
@@ -405,12 +408,16 @@ export default function RecurringBookingForm({
             </div>
             <div className="flex justify-between">
               <span className="text-gray-600">Per lesson:</span>
-              <span className="font-medium">${price}</span>
+              <span className="font-medium">
+                {formatCurrency(parseFloat(price), parseCurrencyCode(tutor.currency))}
+              </span>
             </div>
             <div className="border-t pt-3 mt-3">
               <div className="flex justify-between text-lg font-bold">
                 <span>Total:</span>
-                <span className="text-pink-600">${totalPrice}</span>
+                <span className="text-pink-600">
+                  {formatCurrency(parseFloat(totalPrice), parseCurrencyCode(tutor.currency))}
+                </span>
               </div>
             </div>
           </div>
