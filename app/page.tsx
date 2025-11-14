@@ -24,7 +24,13 @@ import {
 import { supabase } from '@/lib/supabase-db'
 
 export default async function Home() {
-  const session = await getServerSession(authOptions)
+  let session = null
+  try {
+    session = await getServerSession(authOptions)
+  } catch (error) {
+    console.error('Error getting session:', error)
+    // Continue without session if auth fails
+  }
   
   // Redirect authenticated users to dashboard
   if (session) {

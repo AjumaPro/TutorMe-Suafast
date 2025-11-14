@@ -20,7 +20,11 @@ function getSupabaseClient(): SupabaseClient {
   // Only throw error at runtime when actually trying to use Supabase
   if (!supabaseUrl || !supabaseServiceKey) {
     // Check if we're in a build context (Next.js sets this)
-    if (process.env.NEXT_PHASE === 'phase-production-build' || process.env.NEXT_PHASE === 'phase-development-build') {
+    const isBuildTime = process.env.NEXT_PHASE === 'phase-production-build' || 
+                       process.env.NEXT_PHASE === 'phase-development-build' ||
+                       process.env.NODE_ENV === 'production' && !process.env.VERCEL
+    
+    if (isBuildTime) {
       // During build, return a mock client that will fail gracefully
       // This allows the build to complete, but API routes will fail at runtime if env vars are missing
       console.warn('⚠️  Supabase env vars not available during build. API routes will require them at runtime.')
@@ -38,8 +42,20 @@ function getSupabaseClient(): SupabaseClient {
       return supabaseClient
     }
     
-    // At runtime, throw error if env vars are missing
-    throw new Error('Missing Supabase environment variables. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY')
+    // At runtime, log warning but don't throw - let queries fail gracefully
+    console.error('❌ Missing Supabase environment variables. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY')
+    // Create a client with placeholder values that will fail queries gracefully
+    supabaseClient = createClient(
+      'https://placeholder.supabase.co',
+      'placeholder-key',
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    )
+    return supabaseClient
   }
 
   // Create Supabase client with service role key for server-side operations
