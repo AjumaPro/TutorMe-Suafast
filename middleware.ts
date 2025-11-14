@@ -41,7 +41,9 @@ export default withAuth(
           '/auth/signup',
           '/auth/forgot-password',
           '/auth/verify-email',
+          '/auth/error', // Allow error page
           '/api/auth',
+          '/api/auth/error', // Allow NextAuth error endpoint
         ]
         const isPublicRoute = publicRoutes.some(route => 
           path === route || path.startsWith(route)

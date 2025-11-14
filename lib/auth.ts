@@ -159,7 +159,7 @@ export const authOptions: NextAuthOptions = {
   },
   pages: {
     signIn: '/auth/signin',
-    error: '/auth/signin', // Error page also redirects to signin
+    error: '/auth/error', // Custom error page
   },
   events: {
     async signIn({ user, account, profile }) {
