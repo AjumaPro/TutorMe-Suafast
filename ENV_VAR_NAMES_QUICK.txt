@@ -1,0 +1,50 @@
+================================================================================
+  ENVIRONMENT VARIABLE NAMES - QUICK REFERENCE
+================================================================================
+
+Enter these in the "Name" field (one per row):
+
+Row 1:  NODE_ENV
+Row 2:  NEXTAUTH_URL
+Row 3:  NEXT_PUBLIC_SUPABASE_URL
+Row 4:  SUPABASE_SERVICE_ROLE_KEY
+Row 5:  NEXTAUTH_SECRET
+Row 6:  PAYSTACK_SECRET_KEY
+
+================================================================================
+HOW TO FILL:
+================================================================================
+
+1. Click in the "Name" field (red border)
+2. Type the name (e.g., NODE_ENV)
+3. Verify the "Value" field is correct
+4. Click "DONE" button
+5. Repeat for each row
+
+================================================================================
+IMPORTANT:
+================================================================================
+
+✓ Name = Variable name only (no spaces, no = sign)
+✓ Value = The actual value (already shown in grey boxes)
+✓ No quotes needed
+✓ Case sensitive - use exact capitalization
+
+================================================================================
+EXAMPLE:
+================================================================================
+
+Row 1:
+  Name:  NODE_ENV
+  Value: production
+  → Click "DONE"
+
+Row 2:
+  Name:  NEXTAUTH_URL
+  Value: https://suafast.live
+  → Click "DONE"
+
+Continue for all 6 rows...
+
+================================================================================
+

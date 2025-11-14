@@ -6,19 +6,20 @@ import nodemailer from 'nodemailer'
 
 // Generate TOTP secret and QR code
 export async function generateTOTPSecret(userEmail: string, serviceName: string = 'TutorMe') {
-  const secret = speakeasy.generateSecret({
+  const result = speakeasy.generateSecret({
     name: `${serviceName} (${userEmail})`,
     issuer: serviceName,
     length: 32,
   })
 
   // Generate QR code data URL
-  const qrCodeUrl = await QRCode.toDataURL(secret.otpauth_url!)
+  const otpauthUrl = result.secret.otpauth_url || result.secret.qr_code_ascii || ''
+  const qrCodeUrl = await QRCode.toDataURL(otpauthUrl)
 
   return {
-    secret: secret.base32,
+    secret: result.secret.base32,
     qrCodeUrl,
-    manualEntryKey: secret.base32,
+    manualEntryKey: result.secret.base32,
   }
 }
 

@@ -17,7 +17,8 @@ process.on('unhandledRejection', (reason, promise) => {
 })
 
 const dev = process.env.NODE_ENV !== 'production'
-const hostname = 'localhost'
+// In production, bind to 0.0.0.0 to accept connections from any interface
+const hostname = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost'
 const port = parseInt(process.env.PORT || '3000', 10)
 
 const app = next({ dev, hostname, port })

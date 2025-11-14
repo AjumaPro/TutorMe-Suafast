@@ -1,0 +1,87 @@
+================================================================================
+  VERCEL DEPLOYMENT - QUICK START
+================================================================================
+
+WHY VERCEL?
+✅ Built for Next.js
+✅ Automatic deployments
+✅ Free tier
+✅ Built-in SSL
+✅ Much easier than cPanel
+✅ No port issues
+
+================================================================================
+QUICK STEPS:
+================================================================================
+
+1. PUSH CODE TO GITHUB
+   git add .
+   git commit -m "Ready for Vercel"
+   git push
+
+2. SIGN UP AT VERCEL.COM
+   → Go to vercel.com
+   → Sign up (free)
+   → Click "Add New Project"
+
+3. IMPORT REPOSITORY
+   → Connect GitHub
+   → Select your repository
+   → Framework: Next.js (auto-detected)
+   → Click "Deploy"
+
+4. ADD ENVIRONMENT VARIABLES
+   → Project Settings → Environment Variables
+   → Add:
+     NEXTAUTH_URL=https://suafast.live
+     NEXTAUTH_SECRET=your-secret
+     NEXT_PUBLIC_SUPABASE_URL=https://ptjnlzrvqyynklzdipac.supabase.co
+     SUPABASE_SERVICE_ROLE_KEY=your-key
+     PAYSTACK_SECRET_KEY=sk_live_...
+
+5. ADD CUSTOM DOMAIN
+   → Project Settings → Domains
+   → Add: suafast.live
+   → Update DNS records (Vercel will show you)
+
+6. DONE!
+   → Your app is live at suafast.live
+   → Future pushes auto-deploy
+
+================================================================================
+ENVIRONMENT VARIABLES:
+================================================================================
+
+Add these in Vercel Dashboard:
+  NEXTAUTH_URL=https://suafast.live
+  NEXTAUTH_SECRET=Q2o/YN1sGIBZ4fP8ZfZEG4pJrZdE7ZjmUtD3IyITODE=
+  NEXT_PUBLIC_SUPABASE_URL=https://ptjnlzrvqyynklzdipac.supabase.co
+  SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+  PAYSTACK_SECRET_KEY=sk_live_...
+
+================================================================================
+ADVANTAGES:
+================================================================================
+
+✓ 5-10 minute setup (vs hours on cPanel)
+✓ No port configuration
+✓ Automatic SSL
+✓ Auto-deployments on git push
+✓ Better performance
+✓ Free tier is generous
+✓ Perfect for Next.js
+
+================================================================================
+READY TO DEPLOY?
+================================================================================
+
+1. Push code to GitHub
+2. Go to vercel.com
+3. Import repository
+4. Add environment variables
+5. Deploy!
+
+That's it! Much easier than cPanel. 🚀
+
+================================================================================
+

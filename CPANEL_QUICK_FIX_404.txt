@@ -1,0 +1,80 @@
+================================================================================
+  QUICK FIX FOR 404 ERROR ON cPanel
+================================================================================
+
+MOST COMMON CAUSES & FIXES:
+
+1. APPLICATION NOT STARTED
+   → Go to Node.js Selector in cPanel
+   → Find your application
+   → Click "Start" or "Restart"
+
+2. WRONG PORT
+   → Check port number in Node.js Selector
+   → Try: http://suafast.live:PORT (replace PORT with actual port)
+   → If works, you need reverse proxy (see #3)
+
+3. MISSING REVERSE PROXY
+   → Upload .htaccess file to public_html/
+   → Update port number in .htaccess (replace 3000 with your port)
+   → Contact hosting if mod_proxy needs to be enabled
+
+4. MISSING ENVIRONMENT VARIABLES
+   → Node.js Selector → Environment Variables
+   → Add all required variables (see deployment guide)
+   → Restart application
+
+5. FILES IN WRONG LOCATION
+   → Verify files are in public_html/ (not subdirectory)
+   → Or update Application Root in Node.js Selector
+
+================================================================================
+STEP-BY-STEP FIX:
+================================================================================
+
+STEP 1: Check Application Status
+  → cPanel → Node.js Selector
+  → Is it "Running"? If not, click "Start"
+
+STEP 2: Note the Port
+  → In Node.js Selector, see what port is assigned
+  → Example: 3000, 3001, 3002, etc.
+
+STEP 3: Test with Port
+  → Try: http://suafast.live:PORT
+  → If it works → Need reverse proxy (Step 4)
+  → If it doesn't → Check logs (Step 5)
+
+STEP 4: Add Reverse Proxy
+  → Upload .htaccess to public_html/
+  → Update port in .htaccess file
+  → Try: http://suafast.live (without port)
+
+STEP 5: Check Logs
+  → Node.js Selector → View Logs
+  → Look for errors
+  → Fix errors and restart
+
+================================================================================
+FILES NEEDED:
+================================================================================
+
+✓ .htaccess (upload to public_html/)
+✓ All application files in correct location
+✓ Environment variables set
+✓ Application started
+
+================================================================================
+STILL NOT WORKING?
+================================================================================
+
+1. Check logs: Node.js Selector → View Logs
+2. Verify files: SSH → ls -la ~/public_html
+3. Test locally: SSH → node server.js
+4. Contact hosting support about:
+   - mod_proxy enabled?
+   - Node.js properly configured?
+   - Port forwarding setup?
+
+================================================================================
+

@@ -1,0 +1,179 @@
+================================================================================
+  SUAFAST - cPanel Deployment Instructions
+  Domain: suafast.live
+================================================================================
+
+BUILD STATUS: ✅ READY FOR DEPLOYMENT
+
+================================================================================
+STEP 1: PREPARE FILES
+================================================================================
+
+Files to upload to cPanel:
+  ✓ .next/          (Build output - REQUIRED)
+  ✓ public/         (Static files - REQUIRED)
+  ✓ server.js       (Server entry point - REQUIRED)
+  ✓ package.json    (Dependencies - REQUIRED)
+  ✓ next.config.js  (Next.js config - REQUIRED)
+
+DO NOT upload:
+  ✗ node_modules/   (Install on server instead)
+  ✗ .env files      (Set in cPanel)
+  ✗ .git/           (Not needed)
+
+================================================================================
+STEP 2: UPLOAD TO cPanel
+================================================================================
+
+Method 1: File Manager
+  1. Log into cPanel
+  2. Open "File Manager"
+  3. Navigate to public_html/ (or your domain folder)
+  4. Upload all required files/folders
+
+Method 2: FTP/SFTP
+  1. Use FileZilla or similar FTP client
+  2. Connect to your server
+  3. Upload files to public_html/ directory
+
+================================================================================
+STEP 3: SETUP NODE.JS APPLICATION
+================================================================================
+
+1. In cPanel, look for "Node.js Selector" or "Setup Node.js App"
+2. Click "Create Application"
+3. Configure:
+   - Node.js Version: 18.x or higher
+   - Application Root: /home/username/public_html
+   - Application URL: suafast.live
+   - Application Startup File: server.js
+4. Click "Create"
+
+================================================================================
+STEP 4: INSTALL DEPENDENCIES
+================================================================================
+
+In Node.js Selector:
+  - Click "Run NPM Install" on your application
+
+OR via SSH:
+  cd ~/public_html
+  npm install --production
+
+================================================================================
+STEP 5: SET ENVIRONMENT VARIABLES
+================================================================================
+
+In Node.js Selector → Environment Variables, add:
+
+  NODE_ENV=production
+  NEXTAUTH_URL=https://suafast.live
+  NEXT_PUBLIC_SUPABASE_URL=https://ptjnlzrvqyynklzdipac.supabase.co
+  SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+  NEXTAUTH_SECRET=your-generated-secret
+  PAYSTACK_SECRET_KEY=sk_live_...
+  PORT=3000
+
+OR create .env.local file in app root with these variables.
+
+================================================================================
+STEP 6: START APPLICATION
+================================================================================
+
+In Node.js Selector:
+  - Click "Start" or "Restart" on your application
+
+OR via SSH with PM2:
+  npm install -g pm2
+  pm2 start server.js --name suafast
+  pm2 save
+
+================================================================================
+STEP 7: CONFIGURE DOMAIN & SSL
+================================================================================
+
+1. Point domain DNS to cPanel server IP
+2. In cPanel → SSL/TLS Status → Run AutoSSL
+3. Update NEXTAUTH_URL to https://suafast.live
+4. Restart application
+
+================================================================================
+STEP 8: CONFIGURE PAYSTACK WEBHOOK
+================================================================================
+
+1. Go to Paystack Dashboard → Settings → Webhooks
+2. Add webhook URL: https://suafast.live/api/payments/webhook
+3. Select events: charge.success, charge.failed
+4. Save and test
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Problem: App won't start
+  → Check Node.js version (needs 18.x+)
+  → Verify environment variables are set
+  → Check application logs
+
+Problem: Module not found
+  → Run: npm install --production
+  → Verify package.json is uploaded
+
+Problem: Environment variables not working
+  → Set in Node.js Selector (recommended)
+  → Or create .env.local file
+  → Restart application
+
+Problem: App stops after disconnect
+  → Use Node.js Selector (keeps running)
+  → Or use PM2: pm2 start server.js --name suafast
+
+================================================================================
+IMPORTANT NOTES
+================================================================================
+
+✓ Don't upload node_modules/ - install on server
+✓ Set environment variables in cPanel, not in uploaded files
+✓ Use Node.js Selector to keep app running
+✓ Check hosting resource limits
+✓ Some shared hosting may not support Node.js
+
+================================================================================
+ALTERNATIVE: If cPanel doesn't support Node.js
+================================================================================
+
+Consider:
+  → Vercel (Best for Next.js - Recommended)
+  → Railway
+  → Render
+  → DigitalOcean App Platform
+
+================================================================================
+BUILD INFORMATION
+================================================================================
+
+Build Location: /Users/newuser/TutorMe/.next/
+Build Size: ~333 MB
+Build Status: ✅ Success
+Ready for: cPanel deployment
+
+================================================================================
+SUPPORT
+================================================================================
+
+For issues:
+  1. Check cPanel Node.js Selector logs
+  2. Review application error logs
+  3. Contact hosting provider
+  4. Verify all environment variables are set
+
+================================================================================
+READY TO DEPLOY!
+================================================================================
+
+Follow the steps above to deploy suafast.live to cPanel.
+
+Good luck! 🚀
+
+================================================================================
+

@@ -1,0 +1,22 @@
+# Suafast - Reverse Proxy Configuration for cPanel
+# This file should be placed in public_html/ directory
+
+RewriteEngine On
+
+# Get the port from your Node.js Selector (replace 3000 with your actual port)
+# Common ports: 3000, 3001, 3002, etc.
+# Check your Node.js Selector to find the correct port
+
+# Don't proxy Socket.io connections (they handle their own routing)
+RewriteCond %{REQUEST_URI} !^/socket.io/
+
+# Proxy all other requests to Node.js application
+# Replace 3000 with your actual Node.js port from Node.js Selector
+RewriteRule ^(.*)$ http://localhost:3000/$1 [P,L]
+
+# If the above doesn't work, try this alternative:
+# RewriteRule ^(.*)$ http://127.0.0.1:3000/$1 [P,L]
+
+# Enable proxy module (may require hosting support to enable mod_proxy)
+# If you get 500 error, contact hosting to enable mod_proxy and mod_rewrite
+

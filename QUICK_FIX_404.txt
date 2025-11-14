@@ -1,0 +1,67 @@
+================================================================================
+  QUICK FIX FOR 404 ERROR
+================================================================================
+
+PROBLEM FOUND:
+❌ Missing .next/ folder in your file structure!
+
+This folder contains all your built Next.js files.
+Without it, the app can't serve pages → 404 error.
+
+================================================================================
+SOLUTION:
+================================================================================
+
+STEP 1: Upload Build Package
+  → Upload: suafast-cpanel-build.tar.gz
+  → Location: /home/ajumcfam/suafast.live/
+
+STEP 2: Extract Archive
+  → Right-click suafast-cpanel-build.tar.gz
+  → Select "Extract"
+  → This creates the .next/ folder
+
+STEP 3: Verify Files
+  After extraction, you should see:
+  ✓ .next/ folder (NEW - this is critical!)
+  ✓ public/ folder
+  ✓ server.js
+  ✓ package.json
+  ✓ next.config.js
+
+STEP 4: Restart Application
+  → Node.js Selector → Restart your app
+
+STEP 5: Test
+  → suafast.live:PORT (use actual port from Node.js Selector)
+
+================================================================================
+WHAT'S MISSING:
+================================================================================
+
+Your current files:
+  ✓ public/
+  ✓ server.js
+  ✓ package.json
+  ✓ node_modules/
+  ❌ .next/  ← THIS IS MISSING!
+
+The .next/ folder contains:
+  - All built pages
+  - Server-side code
+  - Static assets
+  - Routing information
+
+Without it → 404 error
+
+================================================================================
+AFTER FIXING:
+================================================================================
+
+1. .next/ folder should appear in file list
+2. Restart Node.js application
+3. Test: suafast.live:PORT
+4. Should work now!
+
+================================================================================
+
