@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { formatCurrency, parseCurrencyCode } from '@/lib/currency'
-import { Calendar, Clock, Video, MapPin, User, CheckCircle, XCircle, Play, MoreVertical } from 'lucide-react'
+import { Calendar, Clock, Video, MapPin, User, CheckCircle, XCircle, Play, MoreVertical, Check, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
 interface Booking {
@@ -35,6 +35,7 @@ export default function TutorClassManagement({ bookings, tutorProfile }: TutorCl
   const router = useRouter()
   const [filter, setFilter] = useState<'all' | 'upcoming' | 'today' | 'pending' | 'completed'>('all')
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
+  const [processingBooking, setProcessingBooking] = useState<string | null>(null)
 
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -104,6 +105,34 @@ export default function TutorClassManagement({ bookings, tutorProfile }: TutorCl
     } catch (error) {
       console.error('Error starting session:', error)
       alert('Failed to start session')
+    }
+  }
+
+  const handleAcceptReject = async (bookingId: string, accepted: boolean) => {
+    if (processingBooking) return
+    
+    setProcessingBooking(bookingId)
+    try {
+      const response = await fetch(`/api/bookings/${bookingId}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accepted }),
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        alert(result.error || `Failed to ${accepted ? 'accept' : 'reject'} booking`)
+        return
+      }
+
+      // Refresh the page to show updated status
+      router.refresh()
+    } catch (error) {
+      console.error('Error accepting/rejecting booking:', error)
+      alert(`Failed to ${accepted ? 'accept' : 'reject'} booking`)
+    } finally {
+      setProcessingBooking(null)
     }
   }
 
@@ -217,7 +246,27 @@ export default function TutorClassManagement({ bookings, tutorProfile }: TutorCl
                   </div>
 
                   <div className="ml-4 flex flex-col gap-2">
-                    {canStart && booking.lessonType === 'ONLINE' && (
+                    {booking.status === 'PENDING' && (
+                      <>
+                        <button
+                          onClick={() => handleAcceptReject(booking.id, true)}
+                          disabled={processingBooking === booking.id}
+                          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Check className="h-4 w-4" />
+                          {processingBooking === booking.id ? 'Processing...' : 'Accept'}
+                        </button>
+                        <button
+                          onClick={() => handleAcceptReject(booking.id, false)}
+                          disabled={processingBooking === booking.id}
+                          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium flex items-center gap-2 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <X className="h-4 w-4" />
+                          {processingBooking === booking.id ? 'Processing...' : 'Reject'}
+                        </button>
+                      </>
+                    )}
+                    {canStart && booking.lessonType === 'ONLINE' && booking.status === 'CONFIRMED' && (
                       <button
                         onClick={() => handleStartSession(booking)}
                         className="px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors text-sm font-medium flex items-center gap-2 whitespace-nowrap"

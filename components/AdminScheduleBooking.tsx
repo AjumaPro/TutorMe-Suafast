@@ -15,6 +15,7 @@ export default function AdminScheduleBooking({ tutor, students, onClose, onSucce
   const [error, setError] = useState('')
   const [formData, setFormData] = useState({
     studentId: '',
+    studentIds: [] as string[],
     subject: '',
     lessonType: 'ONLINE' as 'ONLINE' | 'IN_PERSON',
     scheduledDate: '',
@@ -22,6 +23,8 @@ export default function AdminScheduleBooking({ tutor, students, onClose, onSucce
     duration: 60,
     price: tutor?.hourlyRate || 0,
     notes: '',
+    isGroupClass: false,
+    maxParticipants: 10,
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -39,19 +42,44 @@ export default function AdminScheduleBooking({ tutor, students, onClose, onSucce
         return
       }
 
+      // Validate student selection
+      if (formData.isGroupClass && formData.studentIds.length === 0) {
+        setError('Please select at least one student for the group class')
+        setLoading(false)
+        return
+      }
+
+      if (!formData.isGroupClass && !formData.studentId) {
+        setError('Please select a student')
+        setLoading(false)
+        return
+      }
+
+      const requestBody: any = {
+        tutorId: tutor.id,
+        subject: formData.subject,
+        lessonType: formData.lessonType,
+        scheduledAt: scheduledAt.toISOString(),
+        duration: formData.duration,
+        price: formData.price,
+        isGroupClass: formData.isGroupClass,
+        maxParticipants: formData.maxParticipants,
+      }
+
+      if (formData.isGroupClass && formData.studentIds.length > 0) {
+        requestBody.studentIds = formData.studentIds
+      } else if (!formData.isGroupClass && formData.studentId) {
+        requestBody.studentId = formData.studentId
+      }
+
+      if (formData.notes && formData.notes.trim()) {
+        requestBody.notes = formData.notes.trim()
+      }
+
       const response = await fetch('/api/admin/bookings/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tutorId: tutor.id,
-          studentId: formData.studentId,
-          subject: formData.subject,
-          lessonType: formData.lessonType,
-          scheduledAt: scheduledAt.toISOString(),
-          duration: formData.duration,
-          price: formData.price,
-          notes: formData.notes || undefined,
-        }),
+        body: JSON.stringify(requestBody),
       })
 
       const result = await response.json()
@@ -104,26 +132,87 @@ export default function AdminScheduleBooking({ tutor, students, onClose, onSucce
             </div>
           </div>
 
-          {/* Student Selection */}
+          {/* Group Class Toggle */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              <User className="h-4 w-4 inline mr-1" />
-              Student *
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={formData.isGroupClass}
+                onChange={(e) => setFormData({ ...formData, isGroupClass: e.target.checked, studentId: '', studentIds: [] })}
+                className="w-4 h-4 text-pink-600 border-gray-300 rounded focus:ring-pink-500"
+              />
+              <span className="text-sm font-medium text-gray-700">Group Class</span>
             </label>
-            <select
-              required
-              value={formData.studentId}
-              onChange={(e) => setFormData({ ...formData, studentId: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-            >
-              <option value="">Select a student</option>
-              {students.map((student) => (
-                <option key={student.id} value={student.id}>
-                  {student.name} ({student.email})
-                </option>
-              ))}
-            </select>
           </div>
+
+          {/* Student Selection */}
+          {formData.isGroupClass ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <User className="h-4 w-4 inline mr-1" />
+                Students * (Select multiple)
+              </label>
+              <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-lg p-2">
+                {students.map((student) => (
+                  <label key={student.id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.studentIds.includes(student.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setFormData({ ...formData, studentIds: [...formData.studentIds, student.id] })
+                        } else {
+                          setFormData({ ...formData, studentIds: formData.studentIds.filter(id => id !== student.id) })
+                        }
+                      }}
+                      className="w-4 h-4 text-pink-600 border-gray-300 rounded focus:ring-pink-500"
+                    />
+                    <span className="text-sm text-gray-700">{student.name} ({student.email})</span>
+                  </label>
+                ))}
+              </div>
+              {formData.studentIds.length === 0 && (
+                <p className="text-sm text-red-500 mt-1">Please select at least one student</p>
+              )}
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <User className="h-4 w-4 inline mr-1" />
+                Student *
+              </label>
+              <select
+                required={!formData.isGroupClass}
+                value={formData.studentId}
+                onChange={(e) => setFormData({ ...formData, studentId: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              >
+                <option value="">Select a student</option>
+                {students.map((student) => (
+                  <option key={student.id} value={student.id}>
+                    {student.name} ({student.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Max Participants for Group Classes */}
+          {formData.isGroupClass && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Max Participants
+              </label>
+              <input
+                type="number"
+                min="2"
+                max="20"
+                value={formData.maxParticipants}
+                onChange={(e) => setFormData({ ...formData, maxParticipants: parseInt(e.target.value) || 10 })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+            </div>
+          )}
 
           {/* Subject */}
           <div>
