@@ -33,7 +33,11 @@ export default function DashboardSidebar() {
   const [isMobileOpen, setIsMobileOpen] = useState(false)
 
   const navItems = [
-    { href: '/dashboard', label: 'Dashboard', icon: Home },
+    { 
+      href: session?.user.role === 'TUTOR' ? '/tutor/dashboard' : '/dashboard', 
+      label: 'Dashboard', 
+      icon: Home 
+    },
     { href: '/tutors', label: 'Tutors', icon: Users },
     { href: '/analytics', label: 'Analytics', icon: BarChart3 },
     { href: '/schedule', label: 'Schedule', icon: Calendar },
@@ -50,6 +54,12 @@ export default function DashboardSidebar() {
       href: '/tutor/profile',
       label: 'My Profile',
       icon: User,
+      show: session?.user.role === 'TUTOR',
+    },
+    {
+      href: '/tutor/dashboard',
+      label: 'Tutor Dashboard',
+      icon: BarChart3,
       show: session?.user.role === 'TUTOR',
     },
     { href: '/bookings', label: 'My Bookings', icon: BookMarked, show: true },

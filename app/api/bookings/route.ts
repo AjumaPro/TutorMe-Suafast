@@ -143,6 +143,7 @@ export async function POST(request: Request) {
     // Send notification to tutor about new booking
     try {
       const { createNotification } = await import('@/lib/notifications')
+      const { sendBookingNotificationEmail } = await import('@/lib/email')
       
       // Fetch tutor user data
       if (tutor?.userId) {
@@ -161,6 +162,8 @@ export async function POST(request: Request) {
         
         if (tutorUser) {
           const scheduledAt = new Date(validatedData.scheduledAt)
+          
+          // Create in-app notification
           await createNotification({
             userId: tutor.userId,
             type: 'BOOKING_CREATED',
@@ -176,6 +179,24 @@ export async function POST(request: Request) {
               lessonType: validatedData.lessonType,
             },
           })
+
+          // Send email notification
+          if (tutorUser.email) {
+            await sendBookingNotificationEmail(
+              tutorUser.email,
+              tutorUser.name || 'Tutor',
+              studentData?.name || 'A student',
+              {
+                id: booking.id,
+                subject: validatedData.subject,
+                scheduledAt: scheduledAt.toISOString(),
+                duration: validatedData.duration,
+                lessonType: validatedData.lessonType,
+                price: booking.price || 0,
+                currency: booking.currency || 'GHS',
+              }
+            )
+          }
         }
       }
     } catch (notificationError) {
