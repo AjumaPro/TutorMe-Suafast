@@ -6,6 +6,8 @@ import DashboardSidebar from '@/components/DashboardSidebar'
 import { supabase } from '@/lib/supabase-db'
 import TutorClassManagement from '@/components/TutorClassManagement'
 import TutorNotificationsPanel from '@/components/TutorNotificationsPanel'
+import TutorAssignedStudents from '@/components/TutorAssignedStudents'
+import AvailabilityCalendar from '@/components/AvailabilityCalendar'
 import { formatCurrency, parseCurrencyCode } from '@/lib/currency'
 import { Calendar, Clock, Users, DollarSign, TrendingUp, Video, BookOpen } from 'lucide-react'
 import Link from 'next/link'
@@ -42,10 +44,20 @@ export default async function TutorDashboardPage() {
     if (booking.studentId) {
       const { data: student } = await supabase
         .from('users')
-        .select('name, email, image')
+        .select('name, email, image, phone')
         .eq('id', booking.studentId)
         .single()
       booking.student = student || null
+      
+      // Fetch student address for in-person lessons
+      if (booking.lessonType === 'IN_PERSON' && booking.addressId) {
+        const { data: address } = await supabase
+          .from('addresses')
+          .select('*')
+          .eq('id', booking.addressId)
+          .single()
+        booking.studentAddress = address || null
+      }
     }
     
     // Fetch video session if exists
@@ -217,6 +229,8 @@ export default async function TutorDashboardPage() {
                   tutorProfile={tutorProfile}
                 />
 
+                <TutorAssignedStudents bookings={bookings} />
+
                 {/* Today's Classes */}
                 {todaysClasses.length > 0 && (
                   <div className="bg-white rounded-xl shadow-md p-6">
@@ -313,6 +327,13 @@ export default async function TutorDashboardPage() {
                     >
                       <Calendar className="h-5 w-5 text-blue-600" />
                       <span className="font-medium text-gray-700">View Schedule</span>
+                    </Link>
+                    <Link
+                      href="/tutor/availability"
+                      className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      <Clock className="h-5 w-5 text-green-600" />
+                      <span className="font-medium text-gray-700">Set Availability</span>
                     </Link>
                     <Link
                       href="/lessons"
