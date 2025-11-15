@@ -63,12 +63,15 @@ export default async function LessonPage({
     if (tutor?.userId) {
       const { data: userData } = await supabase
         .from('users')
-        .select('name, email')
+        .select('*')
         .eq('id', tutor.userId)
         .single()
       tutorUser = userData
     }
   }
+  
+  // Import security utilities
+  const { sanitizeUser } = await import('@/lib/security')
   
   // Fetch student data
   let student = null
@@ -76,19 +79,38 @@ export default async function LessonPage({
   if (bookingData.studentId) {
     const { data: studentData } = await supabase
       .from('users')
-      .select('name, email, phone')
+      .select('*')
       .eq('id', bookingData.studentId)
       .single()
-    student = studentData
+    
+    // Sanitize based on viewer context
+    const isStudentSelf = bookingData.studentId === session.user.id
+    const isBookingPartner = 
+      (session.user.role === 'TUTOR' && bookingData.tutorId) ||
+      (session.user.role === 'PARENT' && bookingData.studentId === session.user.id)
+    
+    student = studentData ? sanitizeUser(
+      studentData,
+      isStudentSelf ? 'self' : isBookingPartner ? 'booking_partner' : 'public',
+      isStudentSelf || session.user.role === 'ADMIN', // Email for self/admin
+      isBookingPartner || session.user.role === 'ADMIN' // Phone for booking partners/admin
+    ) : null
     
     // Fetch student address if it's an in-person lesson
+    // Only show address to booking partners (tutor viewing their student) or admin
     if (bookingData.lessonType === 'IN_PERSON' && bookingData.addressId) {
-      const { data: address } = await supabase
-        .from('addresses')
-        .select('*')
-        .eq('id', bookingData.addressId)
-        .single()
-      studentAddress = address
+      const isBookingPartner = 
+        (session.user.role === 'TUTOR' && bookingData.tutorId) ||
+        (session.user.role === 'PARENT' && bookingData.studentId === session.user.id)
+      
+      if (isBookingPartner || session.user.role === 'ADMIN') {
+        const { data: address } = await supabase
+          .from('addresses')
+          .select('*')
+          .eq('id', bookingData.addressId)
+          .single()
+        studentAddress = address
+      }
     }
   }
   
@@ -137,9 +159,17 @@ export default async function LessonPage({
   // Allow access to view lesson details for any status
   // Users can view their own lessons regardless of status
 
+  // Sanitize tutor user data for display
+  const sanitizedTutorUser = booking.tutor?.user ? sanitizeUser(
+    booking.tutor.user,
+    booking.tutor.userId === session.user.id ? 'self' : 'public',
+    false, // Don't show tutor email to students
+    false  // Don't show tutor phone
+  ) : null
+
   const otherPerson =
     session.user.role === 'PARENT' 
-      ? (booking.tutor?.user || { name: 'Tutor' })
+      ? (sanitizedTutorUser || { name: 'Tutor' })
       : (booking.student || { name: 'Student' })
 
   return (

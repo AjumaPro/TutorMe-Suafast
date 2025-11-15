@@ -346,7 +346,7 @@ export async function GET(request: Request) {
         if (tutor?.userId) {
           const { data: userData } = await supabase
             .from('users')
-            .select('name, email, image')
+            .select('*')
             .eq('id', tutor.userId)
             .single()
           tutorUser = userData
@@ -358,19 +358,23 @@ export async function GET(request: Request) {
       if (booking.studentId) {
         const { data: studentData } = await supabase
           .from('users')
-          .select('name, email, image, phone')
+          .select('*')
           .eq('id', booking.studentId)
           .single()
         student = studentData
         
         // Fetch student address if it's an in-person lesson
+        // Only include address for booking partners (tutor viewing their student)
         if (booking.lessonType === 'IN_PERSON' && booking.addressId) {
-          const { data: address } = await supabase
-            .from('addresses')
-            .select('*')
-            .eq('id', booking.addressId)
-            .single()
-          studentAddress = address
+          const isBookingPartner = session.user.role === 'TUTOR' && booking.tutorId
+          if (isBookingPartner || session.user.role === 'ADMIN' || booking.studentId === session.user.id) {
+            const { data: address } = await supabase
+              .from('addresses')
+              .select('*')
+              .eq('id', booking.addressId)
+              .single()
+            studentAddress = address
+          }
         }
       }
 
@@ -386,15 +390,41 @@ export async function GET(request: Request) {
         .eq('bookingId', booking.id)
         .single()
 
+      // Import security utilities
+      const { sanitizeUser, sanitizeTutorProfile, removeSensitiveFields } = await import('@/lib/security')
+
+      // Determine context for data sanitization
+      const isTutorSelf = tutor?.userId === session.user.id
+      const isStudentSelf = booking.studentId === session.user.id
+      const isBookingPartner = 
+        (session.user.role === 'TUTOR' && booking.tutorId) ||
+        (session.user.role === 'PARENT' && booking.studentId === session.user.id)
+
+      // Sanitize tutor data
+      const sanitizedTutor = tutor ? {
+        ...sanitizeTutorProfile(tutor, isTutorSelf ? 'self' : 'public'),
+        user: tutorUser ? sanitizeUser(
+          tutorUser,
+          isTutorSelf ? 'self' : session.user.role === 'ADMIN' ? 'admin' : 'public',
+          isTutorSelf || session.user.role === 'ADMIN', // Email only for self/admin
+          false // Don't include phone for tutors
+        ) : null,
+      } : null
+
+      // Sanitize student data
+      const sanitizedStudent = student ? sanitizeUser(
+        student,
+        isStudentSelf ? 'self' : isBookingPartner ? 'booking_partner' : 'public',
+        isStudentSelf || session.user.role === 'ADMIN', // Email only for self/admin
+        isBookingPartner || session.user.role === 'ADMIN' // Phone for booking partners/admin
+      ) : null
+
       const bookingWithRelations = {
         ...booking,
-        tutor: tutor ? {
-          ...tutor,
-          user: tutorUser,
-        } : null,
-        student: student,
-        studentAddress: studentAddress,
-        payment: payment || null,
+        tutor: sanitizedTutor,
+        student: sanitizedStudent,
+        studentAddress: studentAddress, // Already filtered above
+        payment: payment ? removeSensitiveFields(payment) : null,
         review: review || null,
       }
 
@@ -441,6 +471,9 @@ export async function GET(request: Request) {
       
       bookings = bookingsData || []
       
+      // Import security utilities
+      const { sanitizeUser, sanitizeTutorProfile } = await import('@/lib/security')
+
       // Fetch related data separately
       for (const booking of bookings) {
         if (booking.tutorId) {
@@ -451,7 +484,8 @@ export async function GET(request: Request) {
             .single()
           
           if (tutor) {
-            booking.tutor = tutor
+            const isTutorSelf = tutor.userId === session.user.id
+            booking.tutor = sanitizeTutorProfile(tutor, isTutorSelf ? 'self' : 'public')
             if (tutor.userId) {
               const { data: tutorUser } = await supabase
                 .from('users')
@@ -459,11 +493,13 @@ export async function GET(request: Request) {
                 .eq('id', tutor.userId)
                 .single()
               
-              booking.tutor.user = tutorUser ? {
-                name: tutorUser.name,
-                email: tutorUser.email,
-                image: tutorUser.image,
-              } : null
+              // Parents can see tutor name and image, but not email unless needed
+              booking.tutor.user = tutorUser ? sanitizeUser(
+                tutorUser,
+                isTutorSelf ? 'self' : 'public',
+                false, // Don't expose tutor email to students
+                false  // Don't expose tutor phone
+              ) : null
             }
           }
         }
@@ -499,6 +535,9 @@ export async function GET(request: Request) {
         
         bookings = bookingsData || []
         
+        // Import security utilities
+        const { sanitizeUser } = await import('@/lib/security')
+
         // Fetch related data separately
         for (const booking of bookings) {
           if (booking.studentId) {
@@ -508,12 +547,13 @@ export async function GET(request: Request) {
               .eq('id', booking.studentId)
               .single()
             
-            booking.student = student ? {
-              name: student.name,
-              email: student.email,
-              image: student.image,
-              phone: student.phone,
-            } : null
+            // Tutors can see student email and phone for their bookings (booking partners)
+            booking.student = student ? sanitizeUser(
+              student,
+              'booking_partner',
+              true, // Include email for communication
+              true  // Include phone for lesson coordination
+            ) : null
             
             // Fetch student address if it's an in-person lesson
             if (booking.lessonType === 'IN_PERSON' && booking.addressId) {

@@ -60,10 +60,14 @@ export async function GET(request: Request) {
           if (tutor?.userId) {
             const { data: userData } = await supabase
               .from('users')
-              .select('name, email')
+              .select('*')
               .eq('id', tutor.userId)
               .single()
-            tutorUser = userData
+            // Only include tutor email in export if it's the user's own data
+            tutorUser = userData ? {
+              name: userData.name,
+              email: userData.email, // Own export can include email
+            } : null
           }
         }
 

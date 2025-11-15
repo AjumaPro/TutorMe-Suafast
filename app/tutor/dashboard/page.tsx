@@ -39,17 +39,32 @@ export default async function TutorDashboardPage() {
 
   const bookings = bookingsData || []
 
+  // Import security utilities
+  const { sanitizeUser } = await import('@/lib/security')
+
   // Fetch related student data
   for (const booking of bookings) {
     if (booking.studentId) {
       const { data: student } = await supabase
         .from('users')
-        .select('name, email, image, phone')
+        .select('*')
         .eq('id', booking.studentId)
         .single()
-      booking.student = student || null
       
-      // Fetch student address for in-person lessons
+      // Sanitize student data - tutors can see name, email, and phone for booking coordination
+      // but only for their own bookings (already filtered by tutorId)
+      if (student) {
+        booking.student = sanitizeUser(
+          student,
+          'booking_partner', // Tutor has booking with student
+          true, // Include email for communication
+          true  // Include phone for lesson coordination
+        )
+      } else {
+        booking.student = null
+      }
+      
+      // Fetch student address for in-person lessons (only for tutors with bookings)
       if (booking.lessonType === 'IN_PERSON' && booking.addressId) {
         const { data: address } = await supabase
           .from('addresses')

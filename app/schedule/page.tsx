@@ -28,6 +28,9 @@ export default async function SchedulePage() {
     
     bookings = bookingsData || []
     
+    // Import security utilities
+    const { sanitizeUser, sanitizeTutorProfile } = await import('@/lib/security')
+
     // Fetch related tutor, student, and user data
     for (const booking of bookings) {
       // Fetch tutor data
@@ -39,14 +42,20 @@ export default async function SchedulePage() {
           .single()
         
         if (tutor) {
-          booking.tutor = tutor
+          booking.tutor = sanitizeTutorProfile(tutor, 'admin') // Admin can see all tutor data
           if (tutor.userId) {
             const { data: tutorUser } = await supabase
               .from('users')
-              .select('name, email, image')
+              .select('*')
               .eq('id', tutor.userId)
               .single()
-            booking.tutor.user = tutorUser || null
+            // Admin can see tutor emails for management purposes
+            booking.tutor.user = tutorUser ? sanitizeUser(
+              tutorUser,
+              'admin',
+              true, // Admin can see email
+              false // Don't need phone
+            ) : null
           }
         }
       }
@@ -55,10 +64,16 @@ export default async function SchedulePage() {
       if (booking.studentId) {
         const { data: student } = await supabase
           .from('users')
-          .select('name, email, image')
+          .select('*')
           .eq('id', booking.studentId)
           .single()
-        booking.student = student || null
+        // Admin can see student emails for management purposes
+        booking.student = student ? sanitizeUser(
+          student,
+          'admin',
+          true, // Admin can see email
+          false // Don't need phone in schedule view
+        ) : null
       }
     }
   } else if (session.user.role === 'PARENT') {

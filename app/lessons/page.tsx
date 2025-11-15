@@ -65,10 +65,18 @@ export default async function LessonsPage({
           if (tutor.userId) {
             const { data: tutorUser } = await supabase
               .from('users')
-              .select('name, email, image')
+              .select('*')
               .eq('id', tutor.userId)
               .single()
-            booking.tutor.user = tutorUser || null
+            
+            // Import and use security sanitization
+            const { sanitizeUser } = await import('@/lib/security')
+            booking.tutor.user = tutorUser ? sanitizeUser(
+              tutorUser,
+              'public', // Students viewing their tutor
+              false, // Don't expose tutor email
+              false  // Don't expose tutor phone
+            ) : null
           }
         }
       }
@@ -113,15 +121,25 @@ export default async function LessonsPage({
       const { data: bookingsData } = await query
       bookings = bookingsData || []
       
+      // Import security utilities
+      const { sanitizeUser } = await import('@/lib/security')
+
       // Fetch related data
       for (const booking of bookings) {
         if (booking.studentId) {
           const { data: student } = await supabase
             .from('users')
-            .select('name, email, image')
+            .select('*')
             .eq('id', booking.studentId)
             .single()
-          booking.student = student || null
+          
+          // Tutors can see student email and phone for their bookings
+          booking.student = student ? sanitizeUser(
+            student,
+            'booking_partner',
+            true, // Include email for communication
+            true  // Include phone for coordination
+          ) : null
         }
         
         // Fetch payment and review
