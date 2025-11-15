@@ -3,7 +3,11 @@
  * Run: node scripts/create-sample-tutors.js
  */
 
+// Try .env.local first, then .env
 require('dotenv').config({ path: '.env.local' })
+if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+  require('dotenv').config({ path: '.env' })
+}
 const { createClient } = require('@supabase/supabase-js')
 const bcrypt = require('bcryptjs')
 
