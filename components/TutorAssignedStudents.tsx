@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { User, BookOpen, Calendar, Mail, Phone, MapPin, Video, Clock, CheckCircle, XCircle } from 'lucide-react'
+import { User, Users, BookOpen, Calendar, Mail, Phone, MapPin, Video, Clock, CheckCircle, XCircle } from 'lucide-react'
 import { formatCurrency, parseCurrencyCode } from '@/lib/currency'
 
 interface Student {
