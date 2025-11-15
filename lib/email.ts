@@ -38,7 +38,19 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
 
 async function sendEmailViaResend(options: EmailOptions): Promise<boolean> {
   try {
-    const resend = require('resend')
+    // Dynamically require resend to avoid build errors if not installed
+    let resend: any
+    try {
+      resend = require('resend')
+    } catch (e) {
+      console.warn('Resend package not installed, skipping Resend email provider')
+      return false
+    }
+    
+    if (!resend || !resend.Resend) {
+      return false
+    }
+    
     const resendClient = new resend.Resend(process.env.RESEND_API_KEY)
 
     const from = options.from || process.env.RESEND_FROM_EMAIL || 'TutorMe <noreply@tutorme.com>'

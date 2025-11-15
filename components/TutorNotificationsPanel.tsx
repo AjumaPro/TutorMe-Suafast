@@ -113,7 +113,7 @@ export default function TutorNotificationsPanel({ notifications: initialNotifica
         <div className="text-center py-8">
           <Bell className="h-12 w-12 text-gray-300 mx-auto mb-3" />
           <p className="text-gray-500 text-sm">No notifications</p>
-          <p className="text-gray-400 text-xs mt-1">You're all caught up!</p>
+          <p className="text-gray-400 text-xs mt-1">You&apos;re all caught up!</p>
         </div>
       ) : (
         <div className="space-y-3">

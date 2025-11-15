@@ -86,7 +86,7 @@ export default function TutorAvailabilityView({
     return (
       <div className="text-center py-8">
         <Calendar className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-        <p className="text-gray-500">This tutor hasn't set their availability yet.</p>
+        <p className="text-gray-500">This tutor hasn&apos;t set their availability yet.</p>
       </div>
     )
   }
@@ -137,8 +137,8 @@ export default function TutorAvailabilityView({
 
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
         <p className="text-sm text-blue-800">
-          <strong>Note:</strong> These are the tutor's general weekly availability. When booking,
-          you'll select a specific date and time within these hours.
+          <strong>Note:</strong> These are the tutor&apos;s general weekly availability. When booking,
+          you&apos;ll select a specific date and time within these hours.
         </p>
       </div>
     </div>

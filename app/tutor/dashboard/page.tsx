@@ -252,7 +252,7 @@ export default async function TutorDashboardPage() {
                     <div className="flex items-center justify-between mb-4">
                       <h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
                         <Calendar className="h-5 w-5 text-pink-600" />
-                        Today's Classes
+                        Today&apos;s Classes
                       </h2>
                       <Link
                         href="/schedule"
