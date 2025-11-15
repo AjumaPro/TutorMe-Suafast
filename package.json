@@ -14,6 +14,7 @@
     "seed:test-users": "node scripts/create-test-user.js",
     "seed:tutor-availability": "node scripts/add-tutor-availability.js",
     "seed:tutors": "node scripts/create-sample-tutors.js",
+    "assign:students": "node scripts/assign-students-to-tutors.js",
     "seed": "node scripts/seed-test-data.js",
     "seed:supabase": "node scripts/seed-test-data-supabase.js",
     "setup:admin": "node scripts/setup-admin.js",
