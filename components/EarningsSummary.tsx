@@ -28,7 +28,7 @@ export default function EarningsSummary({
           <Wallet className="h-5 w-5 text-green-600" />
           Earnings Summary
         </h3>
-        <Link href="/analytics" className="text-sm text-green-600 hover:text-green-700 font-medium">
+        <Link href="/tutor/earnings" className="text-sm text-green-600 hover:text-green-700 font-medium">
           View Details
         </Link>
       </div>
@@ -68,7 +68,7 @@ export default function EarningsSummary({
               {pendingPayout.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
             <Link
-              href="/bookings"
+              href="/tutor/dashboard?tab=payments"
               className="text-xs text-green-600 hover:text-green-700 mt-1 inline-block"
             >
               View Payments
@@ -77,7 +77,7 @@ export default function EarningsSummary({
         </div>
 
         <Link
-          href="/bookings"
+          href="/tutor/earnings"
           className="block w-full bg-green-600 text-white text-center py-2 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center justify-center gap-2"
         >
           <CreditCard className="h-4 w-4" />

@@ -100,29 +100,129 @@ export default function BookingForm({ tutor, studentAddresses: initialAddresses,
     }
   }, [lessonType, selectedAddressId, addresses, tutor.latitude, tutor.longitude])
 
-  // Calculate price based on payment frequency and distance surcharge
+  const [pricingRules, setPricingRules] = useState<{
+    IN_PERSON: number
+    ONLINE: number
+  }>({
+    IN_PERSON: 50, // Default: 50 per 2 hours
+    ONLINE: 30, // Default: 30 per 2 hours
+  })
+
+  // Determine course type from subject
+  const getCourseType = (subject: string): 'ACADEMIC' | 'PROFESSIONAL' => {
+    const professionalSubjects = [
+      'Programming & Software Development',
+      'Web Development',
+      'Data Science & Analytics',
+      'Cybersecurity',
+      'Cloud Computing',
+      'Digital Marketing',
+      'Graphic Design',
+      'Video Editing',
+      'Photography',
+      'Business & Entrepreneurship',
+      'Project Management',
+      'Accounting & Finance',
+      'Excel & Data Analysis',
+      'Public Speaking',
+      'Professional Writing',
+      'Language Learning (Business)',
+      'Other Professional',
+    ]
+    return professionalSubjects.includes(subject) ? 'PROFESSIONAL' : 'ACADEMIC'
+  }
+
+  // Fetch pricing rules on mount
+  useEffect(() => {
+    const fetchPricingRules = async () => {
+      try {
+        const response = await fetch('/api/pricing')
+        if (response.ok) {
+          const data = await response.json()
+          const rules = data.rules || []
+          const rulesMap: { IN_PERSON: number; ONLINE: number } = {
+            IN_PERSON: 50,
+            ONLINE: 30,
+          }
+          rules.forEach((rule: any) => {
+            if (rule.lessonType === 'IN_PERSON') {
+              rulesMap.IN_PERSON = rule.pricePerTwoHours
+            } else if (rule.lessonType === 'ONLINE') {
+              rulesMap.ONLINE = rule.pricePerTwoHours
+            }
+          })
+          setPricingRules(rulesMap)
+        }
+      } catch (err) {
+        console.error('Failed to fetch pricing rules:', err)
+        // Use defaults if fetch fails
+      }
+    }
+    fetchPricingRules()
+  }, [])
+
+  // Calculate price based on tutor pricing, admin pricing rules, and distance surcharge
   const calculatePrice = () => {
-    const hourlyRate = tutor.hourlyRate || 0
-    const hours = duration / 60
-    const lessonsPerWeek = 1 // Can be made configurable in the future
+    const subject = watch('subject') || ''
+    const courseType = getCourseType(subject)
     
-    // Base price calculation
     let basePrice = 0
+    
+    // For professional courses, use per-hour pricing
+    if (courseType === 'PROFESSIONAL' && tutor?.professionalPricePerHour) {
+      const hours = duration / 60
+      basePrice = tutor.professionalPricePerHour * hours
+    }
+    // For academic courses, use per-2-hours pricing
+    else if (courseType === 'ACADEMIC') {
+      // Check if tutor has custom academic pricing
+      let pricePerTwoHours: number
+      if (lessonType === 'IN_PERSON' && tutor?.academicInPersonPricePerTwoHours) {
+        pricePerTwoHours = tutor.academicInPersonPricePerTwoHours
+      } else if (lessonType === 'ONLINE' && tutor?.academicOnlinePricePerTwoHours) {
+        pricePerTwoHours = tutor.academicOnlinePricePerTwoHours
+      } else {
+        // Fall back to admin pricing rules
+        pricePerTwoHours = lessonType === 'IN_PERSON' 
+          ? pricingRules.IN_PERSON 
+          : pricingRules.ONLINE
+      }
+      
+      // Calculate base price: (pricePerTwoHours * duration) / 120 minutes
+      basePrice = (pricePerTwoHours * duration) / 120
+    }
+    // Fallback for professional without tutor pricing
+    else if (courseType === 'PROFESSIONAL') {
+      const hours = duration / 60
+      basePrice = 50 * hours // Default professional: 50 per hour
+    }
+    // Final fallback
+    else {
+      const pricePerTwoHours = lessonType === 'IN_PERSON' 
+        ? pricingRules.IN_PERSON 
+        : pricingRules.ONLINE
+      basePrice = (pricePerTwoHours * duration) / 120
+    }
+    
+    // Apply payment frequency multiplier
+    const hours = duration / 60
+    const lessonsPerWeek = 1
     switch (paymentFrequency) {
       case 'HOURLY':
-        basePrice = hourlyRate * hours
+        // Already calculated per duration
         break
       case 'WEEKLY':
-        basePrice = hourlyRate * hours * lessonsPerWeek
+        basePrice = basePrice * lessonsPerWeek
         break
       case 'MONTHLY':
-        basePrice = hourlyRate * hours * lessonsPerWeek * 4
+        basePrice = basePrice * lessonsPerWeek * 4
         break
       case 'YEARLY':
-        basePrice = hourlyRate * hours * lessonsPerWeek * 52
+        basePrice = basePrice * lessonsPerWeek * 52
         break
       default:
-        basePrice = hourlyRate * hours
+        // Already calculated per duration
+        break
     }
     
     // Add distance surcharge for in-person lessons

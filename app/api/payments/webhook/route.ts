@@ -165,13 +165,18 @@ export async function POST(request: Request) {
           }
         }
 
-        // Send notifications to both parent and tutor
+        // Send notifications and emails to both parent and tutor
         try {
+          const { 
+            sendPaymentConfirmationEmail,
+            sendTutorBookingConfirmedEmail 
+          } = await import('@/lib/email')
+          
           const scheduledAt = typeof booking.scheduledAt === 'string' 
             ? booking.scheduledAt 
             : new Date(booking.scheduledAt).toISOString()
 
-          // Notification for parent (student)
+          // Notification and email for parent (student)
           if (student) {
             await createNotification({
               userId: booking.studentId,
@@ -186,9 +191,25 @@ export async function POST(request: Request) {
                 scheduledAt: scheduledAt,
               },
             })
+
+            // Send payment confirmation email to student
+            if (student.email && tutorUser) {
+              await sendPaymentConfirmationEmail(
+                student.email,
+                student.name || 'Student',
+                {
+                  id: payment.bookingId,
+                  subject: booking.subject,
+                  scheduledAt: scheduledAt,
+                  tutorName: tutorUser.name || 'Tutor',
+                  amount: payment.amount,
+                  currency: 'GHS',
+                }
+              )
+            }
           }
 
-          // Notification for tutor
+          // Notification and email for tutor
           if (tutorUser) {
             await createNotification({
               userId: tutor.userId,
@@ -204,9 +225,28 @@ export async function POST(request: Request) {
                 amount: payment.amount,
               },
             })
+
+            // Send booking confirmed email to tutor
+            if (tutorUser.email && student) {
+              await sendTutorBookingConfirmedEmail(
+                tutorUser.email,
+                tutorUser.name || 'Tutor',
+                student.name || 'Student',
+                {
+                  id: payment.bookingId,
+                  subject: booking.subject,
+                  scheduledAt: scheduledAt,
+                  duration: booking.duration || 60,
+                  lessonType: booking.lessonType,
+                  price: payment.amount,
+                  currency: 'GHS',
+                  paymentStatus: 'PAID',
+                }
+              )
+            }
           }
 
-          console.log(`✅ Notifications sent to parent (${student?.email || 'N/A'}) and tutor (${tutorUser?.email || 'N/A'})`)
+          console.log(`✅ Notifications and emails sent to parent (${student?.email || 'N/A'}) and tutor (${tutorUser?.email || 'N/A'})`)
         } catch (notificationError) {
           console.error('Error sending notifications:', notificationError)
           // Don't fail the webhook if notifications fail

@@ -1,6 +1,8 @@
 'use client'
 
-import { Users, CheckCircle, XCircle, DollarSign, BookOpen, TrendingUp, Video, UserCheck } from 'lucide-react'
+import { Users, CheckCircle, XCircle, DollarSign, BookOpen, TrendingUp, Video, UserCheck, CreditCard } from 'lucide-react'
+import Link from 'next/link'
+import TutorStatisticsSummary from './TutorStatisticsSummary'
 
 interface AdminOverviewPanelProps {
   stats: {
@@ -98,9 +100,12 @@ export default function AdminOverviewPanel({ stats }: AdminOverviewPanelProps) {
         </div>
       </div>
 
+      {/* Tutor Statistics Summary */}
+      <TutorStatisticsSummary />
+
       <div className="bg-white rounded-lg shadow-md p-6">
         <h3 className="text-lg font-semibold text-gray-800 mb-4">Quick Actions</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
             <CheckCircle className="h-8 w-8 text-yellow-600 mb-2" />
             <h4 className="font-semibold text-gray-800 mb-1">Review Pending Tutors</h4>
@@ -122,6 +127,16 @@ export default function AdminOverviewPanel({ stats }: AdminOverviewPanelProps) {
               {stats.activeBookings} active class{stats.activeBookings !== 1 ? 'es' : ''}
             </p>
           </div>
+          <Link
+            href="/admin/tutor-payments"
+            className="bg-gradient-to-br from-yellow-400 to-yellow-600 rounded-lg p-4 hover:from-yellow-500 hover:to-yellow-700 transition-all shadow-md hover:shadow-lg cursor-pointer flex flex-col items-center justify-center text-center"
+          >
+            <CreditCard className="h-8 w-8 text-white mb-2" />
+            <h4 className="font-semibold text-white mb-1">Payments</h4>
+            <p className="text-sm text-yellow-50">
+              View tutor payments
+            </p>
+          </Link>
         </div>
       </div>
     </div>

@@ -17,7 +17,7 @@ if (!paystackSecretKey) {
 }
 const paystack = require('paystack')(paystackSecretKey)
 
-const PLATFORM_FEE_PERCENTAGE = 0.15 // 15% commission
+const PLATFORM_FEE_PERCENTAGE = 0.20 // 20% service fee
 
 export async function POST(request: Request) {
   try {

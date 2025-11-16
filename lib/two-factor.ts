@@ -77,7 +77,7 @@ function createEmailTransporter() {
   const smtpHost = process.env.SMTP_HOST
   const smtpPort = process.env.SMTP_PORT
   const smtpUser = process.env.SMTP_USER
-  const smtpPassword = process.env.SMTP_PASSWORD
+  const smtpPassword = process.env.SMTP_PASS || process.env.SMTP_PASSWORD
   const smtpFrom = process.env.SMTP_FROM || smtpUser || 'noreply@tutorme.com'
 
   // If SMTP is not configured, return null (will use console logging)

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Search, User, Mail, Calendar, BookOpen, Plus, Edit, Trash2, X, RefreshCw } from 'lucide-react'
+import { Search, User, Mail, Calendar, BookOpen, Plus, Edit, Trash2, X, RefreshCw, Key } from 'lucide-react'
 
 interface StudentManagementPanelProps {
   students: any[]
@@ -16,6 +16,8 @@ export default function StudentManagementPanel({ students, tutors }: StudentMana
   const [showAssignModal, setShowAssignModal] = useState(false)
   const [showRemoveModal, setShowRemoveModal] = useState(false)
   const [showReassignModal, setShowReassignModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
 
@@ -173,6 +175,28 @@ export default function StudentManagementPanel({ students, tutors }: StudentMana
                         <Plus className="h-4 w-4" />
                         Assign Class
                       </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedStudent(student)
+                          setShowEditModal(true)
+                        }}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
+                      >
+                        <Edit className="h-4 w-4" />
+                        Edit Details
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedStudent(student)
+                          setShowPasswordModal(true)
+                        }}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium flex items-center justify-center gap-2"
+                      >
+                        <Key className="h-4 w-4" />
+                        Change Password
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -265,6 +289,82 @@ export default function StudentManagementPanel({ students, tutors }: StudentMana
             }
           }}
           loading={loading === 'reassign'}
+        />
+      )}
+
+      {/* Edit Student Modal */}
+      {showEditModal && selectedStudent && (
+        <EditStudentModal
+          student={selectedStudent}
+          onClose={() => {
+            setShowEditModal(false)
+            setSelectedStudent(null)
+          }}
+          onUpdate={async (updateData: any) => {
+            setLoading('edit')
+            try {
+              const response = await fetch(`/api/admin/students/${selectedStudent.id}/update`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify(updateData),
+              })
+
+              if (response.ok) {
+                setShowEditModal(false)
+                setSelectedStudent(null)
+                router.refresh()
+                alert('Student details updated successfully!')
+              } else {
+                const error = await response.json()
+                alert(error.error || 'Failed to update student')
+              }
+            } catch (error) {
+              console.error('Error updating student:', error)
+              alert('Failed to update student')
+            } finally {
+              setLoading(null)
+            }
+          }}
+          loading={loading === 'edit'}
+        />
+      )}
+
+      {/* Change Password Modal */}
+      {showPasswordModal && selectedStudent && (
+        <ChangePasswordModal
+          student={selectedStudent}
+          onClose={() => {
+            setShowPasswordModal(false)
+            setSelectedStudent(null)
+          }}
+          onChangePassword={async (newPassword: string) => {
+            setLoading('password')
+            try {
+              const response = await fetch(`/api/admin/students/${selectedStudent.id}/password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ newPassword }),
+              })
+
+              if (response.ok) {
+                setShowPasswordModal(false)
+                setSelectedStudent(null)
+                router.refresh()
+                alert('Password changed successfully!')
+              } else {
+                const error = await response.json()
+                alert(error.error || 'Failed to change password')
+              }
+            } catch (error) {
+              console.error('Error changing password:', error)
+              alert('Failed to change password')
+            } finally {
+              setLoading(null)
+            }
+          }}
+          loading={loading === 'password'}
         />
       )}
     </div>
@@ -555,6 +655,292 @@ function ReassignBookingModal({ booking, students, tutors, onClose, onReassign, 
                 className="flex-1 px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? 'Reassigning...' : 'Reassign Class'}
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EditStudentModal({ student, onClose, onUpdate, loading }: any) {
+  const [name, setName] = useState(student.name || '')
+  const [email, setEmail] = useState(student.email || '')
+  const [phone, setPhone] = useState(student.phone || '')
+  const [error, setError] = useState('')
+  const [emailError, setEmailError] = useState('')
+
+  // Normalize email for comparison
+  const normalizeEmail = (email: string) => email.toLowerCase().trim()
+
+  const validateEmail = (emailValue: string): string => {
+    if (!emailValue.trim()) {
+      return 'Email is required'
+    }
+    const normalized = normalizeEmail(emailValue)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(normalized)) {
+      return 'Please enter a valid email address'
+    }
+    return ''
+  }
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    setEmail(value)
+    // Clear error when user starts typing
+    if (emailError) {
+      setEmailError('')
+    }
+  }
+
+  const handleEmailBlur = () => {
+    const error = validateEmail(email)
+    setEmailError(error)
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setEmailError('')
+
+    // Validate all fields
+    if (!name.trim()) {
+      setError('Name is required')
+      return
+    }
+
+    const emailValidationError = validateEmail(email)
+    if (emailValidationError) {
+      setEmailError(emailValidationError)
+      return
+    }
+
+    // Normalize email before comparison and sending
+    const normalizedEmail = normalizeEmail(email)
+    const normalizedStudentEmail = normalizeEmail(student.email || '')
+
+    const updateData: any = {}
+    if (name.trim() !== student.name?.trim()) {
+      updateData.name = name.trim()
+    }
+    if (normalizedEmail !== normalizedStudentEmail) {
+      updateData.email = normalizedEmail
+    }
+    if ((phone || '').trim() !== (student.phone || '').trim()) {
+      updateData.phone = phone?.trim() || null
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      setError('No changes detected')
+      return
+    }
+
+    onUpdate(updateData)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-xl font-semibold text-gray-800">Edit Student Details</h3>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">
+                {error}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Full Name *
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Email Address *
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={handleEmailChange}
+                onBlur={handleEmailBlur}
+                className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+                  emailError
+                    ? 'border-red-300 focus:ring-red-500'
+                    : 'border-gray-300 focus:ring-blue-500'
+                }`}
+                placeholder="student@example.com"
+                required
+              />
+              {emailError && (
+                <p className="mt-1 text-sm text-red-600">{emailError}</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Phone Number
+              </label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="Optional"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? 'Updating...' : 'Update Student'}
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ChangePasswordModal({ student, onClose, onChangePassword, loading }: any) {
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [error, setError] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+
+    if (!newPassword || !confirmPassword) {
+      setError('Both password fields are required')
+      return
+    }
+
+    if (newPassword.length < 8) {
+      setError('Password must be at least 8 characters long')
+      return
+    }
+
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match')
+      return
+    }
+
+    onChangePassword(newPassword)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-xl font-semibold text-gray-800">Change Password</h3>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-800">
+              <strong>Student:</strong> {student.name} ({student.email})
+            </p>
+            <p className="text-xs text-blue-600 mt-1">
+              As an admin, you can change this student's password without their current password.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">
+                {error}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                New Password *
+              </label>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="Minimum 8 characters"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                >
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Confirm New Password *
+              </label>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                placeholder="Re-enter password"
+                required
+              />
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? 'Changing...' : 'Change Password'}
               </button>
               <button
                 type="button"

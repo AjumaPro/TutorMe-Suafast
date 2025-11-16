@@ -140,10 +140,13 @@ export async function POST(request: Request) {
         .eq('id', booking.id)
     }
 
-    // Send notification to tutor about new booking
+    // Send notifications to both student and tutor about new booking
     try {
       const { createNotification } = await import('@/lib/notifications')
-      const { sendBookingNotificationEmail } = await import('@/lib/email')
+      const { 
+        sendBookingNotificationEmail, 
+        sendStudentBookingConfirmationEmail 
+      } = await import('@/lib/email')
       
       // Fetch tutor user data
       if (tutor?.userId) {
@@ -160,32 +163,66 @@ export async function POST(request: Request) {
           .eq('id', session.user.id)
           .single()
         
-        if (tutorUser) {
+        if (tutorUser && studentData) {
           const scheduledAt = new Date(validatedData.scheduledAt)
           
-          // Create in-app notification
+          // Create in-app notification for tutor
           await createNotification({
             userId: tutor.userId,
             type: 'BOOKING_CREATED',
             title: 'New Booking Request',
-            message: `${studentData?.name || 'A student'} has requested a ${validatedData.subject} lesson scheduled for ${scheduledAt.toLocaleDateString()} at ${scheduledAt.toLocaleTimeString()}.`,
+            message: `${studentData.name || 'A student'} has requested a ${validatedData.subject} lesson scheduled for ${scheduledAt.toLocaleDateString()} at ${scheduledAt.toLocaleTimeString()}.`,
             link: `/bookings/${booking.id}`,
             metadata: {
               bookingId: booking.id,
-              studentName: studentData?.name || 'Unknown',
-              studentEmail: studentData?.email || 'Unknown',
+              studentName: studentData.name || 'Unknown',
+              studentEmail: studentData.email || 'Unknown',
               subject: validatedData.subject,
               scheduledAt: scheduledAt.toISOString(),
               lessonType: validatedData.lessonType,
             },
           })
 
-          // Send email notification
+          // Send email notification to tutor
           if (tutorUser.email) {
             await sendBookingNotificationEmail(
               tutorUser.email,
               tutorUser.name || 'Tutor',
-              studentData?.name || 'A student',
+              studentData.name || 'A student',
+              {
+                id: booking.id,
+                subject: validatedData.subject,
+                scheduledAt: scheduledAt.toISOString(),
+                duration: validatedData.duration,
+                lessonType: validatedData.lessonType,
+                price: booking.price || 0,
+                currency: booking.currency || 'GHS',
+              }
+            )
+          }
+
+          // Create in-app notification for student
+          await createNotification({
+            userId: session.user.id,
+            type: 'BOOKING_CREATED',
+            title: 'Booking Request Sent',
+            message: `Your ${validatedData.subject} lesson request with ${tutorUser.name || 'Tutor'} has been sent. Waiting for confirmation.`,
+            link: `/bookings/${booking.id}`,
+            metadata: {
+              bookingId: booking.id,
+              tutorName: tutorUser.name || 'Tutor',
+              subject: validatedData.subject,
+              scheduledAt: scheduledAt.toISOString(),
+              lessonType: validatedData.lessonType,
+            },
+          })
+
+          // Send email notification to student
+          if (studentData.email) {
+            await sendStudentBookingConfirmationEmail(
+              studentData.email,
+              studentData.name || 'Student',
+              tutorUser.name || 'Tutor',
               {
                 id: booking.id,
                 subject: validatedData.subject,
@@ -200,7 +237,7 @@ export async function POST(request: Request) {
         }
       }
     } catch (notificationError) {
-      console.error('Error sending notification to tutor:', notificationError)
+      console.error('Error sending notifications:', notificationError)
       // Don't fail the booking creation if notification fails
     }
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -57,12 +57,112 @@ export default function RecurringBookingForm({
   const selectedDate = watch('startDate')
   const selectedTime = watch('startTime')
 
+  const [pricingRules, setPricingRules] = useState<{
+    IN_PERSON: number
+    ONLINE: number
+  }>({
+    IN_PERSON: 50, // Default: 50 per 2 hours
+    ONLINE: 30, // Default: 30 per 2 hours
+  })
+
+  // Fetch pricing rules on mount
+  useEffect(() => {
+    const fetchPricingRules = async () => {
+      try {
+        const response = await fetch('/api/pricing')
+        if (response.ok) {
+          const data = await response.json()
+          const rules = data.rules || []
+          const rulesMap: { IN_PERSON: number; ONLINE: number } = {
+            IN_PERSON: 50,
+            ONLINE: 30,
+          }
+          rules.forEach((rule: any) => {
+            if (rule.lessonType === 'IN_PERSON') {
+              rulesMap.IN_PERSON = rule.pricePerTwoHours
+            } else if (rule.lessonType === 'ONLINE') {
+              rulesMap.ONLINE = rule.pricePerTwoHours
+            }
+          })
+          setPricingRules(rulesMap)
+        }
+      } catch (err) {
+        console.error('Failed to fetch pricing rules:', err)
+      }
+    }
+    fetchPricingRules()
+  }, [])
+
   const lessonType = watch('lessonType')
   const duration = watch('duration') || 60
+  const subject = watch('subject') || ''
   const recurringPattern = watch('recurringPattern')
   const numberOfOccurrences = watch('numberOfOccurrences') || 4
-  const price = ((tutor.hourlyRate * duration) / 60).toFixed(2)
-  const totalPrice = (parseFloat(price) * numberOfOccurrences).toFixed(2)
+  
+  // Determine course type from subject
+  const getCourseType = (subject: string): 'ACADEMIC' | 'PROFESSIONAL' => {
+    const professionalSubjects = [
+      'Programming & Software Development',
+      'Web Development',
+      'Data Science & Analytics',
+      'Cybersecurity',
+      'Cloud Computing',
+      'Digital Marketing',
+      'Graphic Design',
+      'Video Editing',
+      'Photography',
+      'Business & Entrepreneurship',
+      'Project Management',
+      'Accounting & Finance',
+      'Excel & Data Analysis',
+      'Public Speaking',
+      'Professional Writing',
+      'Language Learning (Business)',
+      'Other Professional',
+    ]
+    return professionalSubjects.includes(subject) ? 'PROFESSIONAL' : 'ACADEMIC'
+  }
+  
+  // Calculate price using tutor pricing or admin pricing rules
+  const courseType = getCourseType(subject)
+  let price = 0
+  
+  // For professional courses, use per-hour pricing
+  if (courseType === 'PROFESSIONAL' && tutor?.professionalPricePerHour) {
+    const hours = duration / 60
+    price = tutor.professionalPricePerHour * hours
+  }
+  // For academic courses, use per-2-hours pricing
+  else if (courseType === 'ACADEMIC') {
+    // Check if tutor has custom academic pricing
+    let pricePerTwoHours: number
+    if (lessonType === 'IN_PERSON' && tutor?.academicInPersonPricePerTwoHours) {
+      pricePerTwoHours = tutor.academicInPersonPricePerTwoHours
+    } else if (lessonType === 'ONLINE' && tutor?.academicOnlinePricePerTwoHours) {
+      pricePerTwoHours = tutor.academicOnlinePricePerTwoHours
+    } else {
+      // Fall back to admin pricing rules
+      pricePerTwoHours = lessonType === 'IN_PERSON' 
+        ? pricingRules.IN_PERSON 
+        : pricingRules.ONLINE
+    }
+    price = (pricePerTwoHours * duration) / 120
+  }
+  // Fallback for professional without tutor pricing
+  else if (courseType === 'PROFESSIONAL') {
+    const hours = duration / 60
+    price = 50 * hours // Default professional: 50 per hour
+  }
+  // Final fallback
+  else {
+    const pricePerTwoHours = lessonType === 'IN_PERSON' 
+      ? pricingRules.IN_PERSON 
+      : pricingRules.ONLINE
+    price = (pricePerTwoHours * duration) / 120
+  }
+  
+  const priceStr = price.toFixed(2)
+  const totalPrice = (parseFloat(priceStr) * numberOfOccurrences).toFixed(2)
 
   const tutorSubjects = Array.isArray(tutor.subjects)
     ? tutor.subjects

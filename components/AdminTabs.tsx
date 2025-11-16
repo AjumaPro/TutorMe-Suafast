@@ -2,9 +2,11 @@
 
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { Users, CheckCircle, UserCheck, BookOpen, Settings } from 'lucide-react'
+import { useSession } from 'next-auth/react'
+import { Users, CheckCircle, UserCheck, BookOpen, Settings, DollarSign, TrendingUp, CreditCard } from 'lucide-react'
 
 export default function AdminTabs() {
+  const { data: session } = useSession()
   const searchParams = useSearchParams()
   const activeTab = searchParams.get('tab') || 'overview'
 
@@ -13,6 +15,13 @@ export default function AdminTabs() {
     { id: 'tutors', label: 'Tutor Approval', icon: CheckCircle },
     { id: 'students', label: 'Student Management', icon: Users },
     { id: 'assignments', label: 'Class Assignments', icon: BookOpen },
+    { id: 'pricing', label: 'Pricing Rules', icon: DollarSign },
+    // Only show statistics tab for admins
+    ...(session?.user.role === 'ADMIN' ? [{ id: 'statistics', label: 'Tutor Statistics', icon: TrendingUp }] : []),
+    // Only show payments tab for admins
+    ...(session?.user.role === 'ADMIN' ? [{ id: 'payments', label: 'Payment Records', icon: CreditCard }] : []),
+    // Only show tutor payments overview tab for admins
+    ...(session?.user.role === 'ADMIN' ? [{ id: 'tutor-payments', label: 'Tutor Payments', icon: TrendingUp }] : []),
   ]
 
   return (

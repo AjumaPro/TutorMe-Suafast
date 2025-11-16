@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Calendar, Clock, User, DollarSign, MapPin, BookOpen, X } from 'lucide-react'
 
 interface AdminScheduleBookingProps {
@@ -13,6 +13,14 @@ interface AdminScheduleBookingProps {
 export default function AdminScheduleBooking({ tutor, students, onClose, onSuccess }: AdminScheduleBookingProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [pricingRules, setPricingRules] = useState<{
+    IN_PERSON: number
+    ONLINE: number
+  }>({
+    IN_PERSON: 50,
+    ONLINE: 30,
+  })
+
   const [formData, setFormData] = useState({
     studentId: '',
     studentIds: [] as string[],
@@ -21,11 +29,55 @@ export default function AdminScheduleBooking({ tutor, students, onClose, onSucce
     scheduledDate: '',
     scheduledTime: '',
     duration: 60,
-    price: tutor?.hourlyRate || 0,
+    price: 0,
     notes: '',
     isGroupClass: false,
     maxParticipants: 10,
   })
+
+  // Fetch pricing rules and calculate initial price
+  useEffect(() => {
+    const fetchPricingRules = async () => {
+      try {
+        const response = await fetch('/api/pricing')
+        if (response.ok) {
+          const data = await response.json()
+          const rules = data.rules || []
+          const rulesMap: { IN_PERSON: number; ONLINE: number } = {
+            IN_PERSON: 50,
+            ONLINE: 30,
+          }
+          rules.forEach((rule: any) => {
+            if (rule.lessonType === 'IN_PERSON') {
+              rulesMap.IN_PERSON = rule.pricePerTwoHours
+            } else if (rule.lessonType === 'ONLINE') {
+              rulesMap.ONLINE = rule.pricePerTwoHours
+            }
+          })
+          setPricingRules(rulesMap)
+          
+          // Calculate initial price
+          const initialPrice = (rulesMap.ONLINE * formData.duration) / 120
+          setFormData(prev => ({ ...prev, price: initialPrice }))
+        }
+      } catch (err) {
+        console.error('Failed to fetch pricing rules:', err)
+        // Use default pricing
+        const defaultPrice = (30 * formData.duration) / 120
+        setFormData(prev => ({ ...prev, price: defaultPrice }))
+      }
+    }
+    fetchPricingRules()
+  }, [])
+
+  // Recalculate price when duration or lesson type changes
+  useEffect(() => {
+    const pricePerTwoHours = formData.lessonType === 'IN_PERSON' 
+      ? pricingRules.IN_PERSON 
+      : pricingRules.ONLINE
+    const calculatedPrice = (pricePerTwoHours * formData.duration) / 120
+    setFormData(prev => ({ ...prev, price: calculatedPrice }))
+  }, [formData.duration, formData.lessonType, pricingRules])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -8,9 +8,10 @@ import TutorClassManagement from '@/components/TutorClassManagement'
 import TutorNotificationsPanel from '@/components/TutorNotificationsPanel'
 import TutorAssignedStudents from '@/components/TutorAssignedStudents'
 import AvailabilityCalendar from '@/components/AvailabilityCalendar'
-import { formatCurrency, parseCurrencyCode } from '@/lib/currency'
+import { formatCurrency, parseCurrencyCode, getCurrency } from '@/lib/currency'
 import { Calendar, Clock, Users, DollarSign, TrendingUp, Video, BookOpen } from 'lucide-react'
 import Link from 'next/link'
+import EarningsSummary from '@/components/EarningsSummary'
 
 export default async function TutorDashboardPage() {
   const session = await getServerSession(authOptions)
@@ -99,14 +100,17 @@ export default async function TutorDashboardPage() {
   // Fetch payments for earnings calculation
   const bookingIds = bookings.map((b: any) => b.id)
   let payments: any[] = []
+  let pendingPayments: any[] = []
   if (bookingIds.length > 0) {
-    const { data: paymentsData } = await supabase
+    // Fetch all payments (both PAID and PENDING)
+    const { data: allPaymentsData } = await supabase
       .from('payments')
       .select('*')
       .in('bookingId', bookingIds)
-      .eq('status', 'PAID')
     
-    payments = paymentsData || []
+    const allPayments = allPaymentsData || []
+    payments = allPayments.filter((p: any) => p.status === 'PAID')
+    pendingPayments = allPayments.filter((p: any) => p.status === 'PENDING')
   }
 
   // Calculate statistics
@@ -125,6 +129,7 @@ export default async function TutorDashboardPage() {
 
   const totalEarnings = payments.reduce((sum: number, p: any) => sum + (p.tutorPayout || 0), 0)
 
+  // Calculate this month earnings
   const thisMonth = new Date()
   thisMonth.setDate(1)
   const thisMonthEarnings = payments
@@ -133,6 +138,28 @@ export default async function TutorDashboardPage() {
       return paidAt >= thisMonth
     })
     .reduce((sum: number, p: any) => sum + (p.tutorPayout || 0), 0)
+
+  // Calculate last month earnings for comparison
+  const lastMonth = new Date()
+  lastMonth.setMonth(lastMonth.getMonth() - 1)
+  lastMonth.setDate(1)
+  const lastMonthEnd = new Date()
+  lastMonthEnd.setDate(0) // Last day of previous month
+  const lastMonthEarnings = payments
+    .filter((p: any) => {
+      const paidAt = p.paidAt ? new Date(p.paidAt) : new Date(p.createdAt)
+      return paidAt >= lastMonth && paidAt <= lastMonthEnd
+    })
+    .reduce((sum: number, p: any) => sum + (p.tutorPayout || 0), 0)
+
+  // Calculate pending payout
+  const pendingPayout = pendingPayments.reduce((sum: number, p: any) => sum + (p.tutorPayout || 0), 0)
+
+  // Get currency from tutor profile
+  const currency = parseCurrencyCode(tutorProfile.currency || 'GHS')
+  
+  // Get currency symbol for display
+  const currencySymbol = getCurrency(currency).symbol
 
   // Get unique students count
   const uniqueStudents = new Set(bookings.map((b: any) => b.studentId).filter(Boolean)).size
@@ -235,6 +262,17 @@ export default async function TutorDashboardPage() {
               </div>
             </div>
 
+            {/* Earnings Summary */}
+            <div className="mb-8">
+              <EarningsSummary
+                totalEarnings={totalEarnings}
+                thisMonth={thisMonthEarnings}
+                lastMonth={lastMonthEarnings}
+                pendingPayout={pendingPayout}
+                currency={currencySymbol}
+              />
+            </div>
+
             {/* Main Content Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Left Column - Class Management */}
@@ -323,6 +361,25 @@ export default async function TutorDashboardPage() {
 
               {/* Right Column - Notifications & Quick Actions */}
               <div className="space-y-6">
+                {/* Service Fees Info */}
+                <div className="bg-white rounded-xl shadow-md p-6">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4">Service Fees</h3>
+                  <div className="text-sm text-gray-600 mb-3">
+                    <p className="mb-2">
+                      <strong className="text-gray-800">Service Fee:</strong> 20% of booking price
+                    </p>
+                    <p>
+                      <strong className="text-gray-800">Your Payout:</strong> 80% of booking price
+                    </p>
+                  </div>
+                  <Link
+                    href="/tutor/service-fees"
+                    className="text-sm text-pink-600 hover:text-pink-700 font-medium"
+                  >
+                    View detailed breakdown →
+                  </Link>
+                </div>
+
                 <TutorNotificationsPanel notifications={notifications} />
 
                 {/* Quick Actions */}
@@ -349,6 +406,13 @@ export default async function TutorDashboardPage() {
                     >
                       <Clock className="h-5 w-5 text-green-600" />
                       <span className="font-medium text-gray-700">Set Availability</span>
+                    </Link>
+                    <Link
+                      href="/tutor/service-fees"
+                      className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      <DollarSign className="h-5 w-5 text-yellow-600" />
+                      <span className="font-medium text-gray-700">Service Fees Info</span>
                     </Link>
                     <Link
                       href="/lessons"

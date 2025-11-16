@@ -3,6 +3,8 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabase } from '@/lib/supabase-db'
 import { createNotification } from '@/lib/notifications'
+import { calculatePrice } from '@/lib/pricing'
+import { getCourseType } from '@/lib/pricing-validation'
 import { z } from 'zod'
 
 function uuidv4() {
@@ -77,16 +79,29 @@ export async function POST(request: Request) {
       ? new Date(validatedData.scheduledAt)
       : new Date(Date.now() + 24 * 60 * 60 * 1000) // Default to tomorrow
 
+    const duration = validatedData.duration || 60
+    const lessonType = 'ONLINE' // Admin assignments default to ONLINE
+    const subject = validatedData.subject || ''
+    
+    // Determine course type
+    const courseType = getCourseType(tutor, subject)
+    
+    // Calculate price using tutor pricing or admin pricing rules
+    let calculatedPrice = validatedData.price
+    if (!calculatedPrice) {
+      calculatedPrice = await calculatePrice(duration, lessonType, tutor, courseType, subject)
+    }
+
     const bookingId = uuidv4()
     const bookingData = {
       id: bookingId,
       studentId: validatedData.studentId,
       tutorId: validatedData.tutorId,
       subject: validatedData.subject,
-      lessonType: 'ONLINE',
+      lessonType: lessonType,
       scheduledAt: scheduledAt.toISOString(),
-      duration: validatedData.duration || 60,
-      price: validatedData.price || tutor.hourlyRate,
+      duration: duration,
+      price: calculatedPrice,
       currency: tutor.currency || 'GHS',
       status: 'CONFIRMED', // Auto-confirm admin assignments
       notes: 'Assigned by administrator',

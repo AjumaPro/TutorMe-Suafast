@@ -28,6 +28,22 @@ const ClassAssignmentsPanel = dynamic(() => import('@/components/ClassAssignment
   ssr: false,
 })
 
+const AdminPricingPanel = dynamic(() => import('@/components/AdminPricingPanel'), {
+  ssr: false,
+})
+
+const TutorStatisticsPanel = dynamic(() => import('@/components/TutorStatisticsPanel'), {
+  ssr: false,
+})
+
+const TutorPaymentsPanel = dynamic(() => import('@/components/TutorPaymentsPanel'), {
+  ssr: false,
+})
+
+const TutorPaymentsOverview = dynamic(() => import('@/components/TutorPaymentsOverview'), {
+  ssr: false,
+})
+
 export default async function AdminPage({
   searchParams,
 }: {
@@ -244,6 +260,18 @@ export default async function AdminPage({
         )}
         {activeTab === 'assignments' && (
           <ClassAssignmentsPanel assignments={bookings} students={students} tutors={tutors} />
+        )}
+        {activeTab === 'pricing' && (
+          <AdminPricingPanel />
+        )}
+        {activeTab === 'statistics' && (
+          <TutorStatisticsPanel />
+        )}
+        {activeTab === 'payments' && (
+          <TutorPaymentsPanel />
+        )}
+        {activeTab === 'tutor-payments' && (
+          <TutorPaymentsOverview />
         )}
       </div>
     </div>

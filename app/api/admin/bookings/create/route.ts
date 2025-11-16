@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabase } from '@/lib/supabase-db'
 import { parseCurrencyCode, DEFAULT_CURRENCY } from '@/lib/currency'
+import { calculatePrice } from '@/lib/pricing'
 import { z } from 'zod'
 import crypto from 'crypto'
 
@@ -101,6 +102,12 @@ export async function POST(request: Request) {
     // Get currency from tutor profile (default to GHS)
     const currency = parseCurrencyCode(tutor.currency || DEFAULT_CURRENCY)
 
+    // Calculate price using admin pricing rules if not provided
+    let bookingPrice = validatedData.price
+    if (!bookingPrice) {
+      bookingPrice = await calculatePrice(validatedData.duration, validatedData.lessonType)
+    }
+
     const now = new Date().toISOString()
     const isGroupClass = validatedData.isGroupClass || false
     const maxParticipants = validatedData.maxParticipants || 10
@@ -116,7 +123,7 @@ export async function POST(request: Request) {
         lessonType: validatedData.lessonType,
         scheduledAt: scheduledAt.toISOString(),
         duration: validatedData.duration,
-        price: validatedData.price,
+        price: bookingPrice,
         currency: currency,
         status: 'PENDING', // Tutors need to accept
         isGroupClass: true,
@@ -157,7 +164,7 @@ export async function POST(request: Request) {
         lessonType: validatedData.lessonType,
         scheduledAt: scheduledAt.toISOString(),
         duration: validatedData.duration,
-        price: validatedData.price,
+        price: bookingPrice,
         currency: currency,
         status: 'PENDING',
         isGroupClass: true,
@@ -205,7 +212,7 @@ export async function POST(request: Request) {
         lessonType: validatedData.lessonType,
         scheduledAt: scheduledAt.toISOString(),
         duration: validatedData.duration,
-        price: validatedData.price,
+        price: bookingPrice,
         currency: currency,
         status: 'PENDING', // Tutors need to accept
         createdAt: now,

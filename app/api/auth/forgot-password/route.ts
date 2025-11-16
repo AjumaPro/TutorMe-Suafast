@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase-db'
 import { z } from 'zod'
 import crypto from 'crypto'
+import { sendPasswordResetEmail } from '@/lib/email'
 
 const forgotPasswordSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -39,16 +40,29 @@ export async function POST(request: Request) {
         })
         .eq('id', user.id)
 
-      // In production, send email with reset link
-      // For now, log it in development
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`Password reset token for ${email}: ${resetToken}`)
-        console.log(`Reset link: ${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/auth/reset-password?token=${resetToken}`)
-      }
+      // Send password reset email
+      try {
+        const emailSent = await sendPasswordResetEmail(
+          user.email,
+          user.name || 'User',
+          resetToken
+        )
 
-      // In production, you would:
-      // 1. Send email with reset link using email service (SendGrid, Resend, etc.)
-      // 2. Use a secure email template
+        if (emailSent) {
+          console.log(`✅ Password reset email sent to ${email}`)
+        } else {
+          console.error(`❌ Failed to send password reset email to ${email}`)
+          // Still return success to prevent email enumeration
+        }
+      } catch (emailError) {
+        console.error('Error sending password reset email:', emailError)
+        // Log to console as fallback in development
+      if (process.env.NODE_ENV === 'development') {
+          const resetLink = `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/auth/reset-password?token=${resetToken}`
+          console.log(`📧 Password reset link (fallback): ${resetLink}`)
+        }
+        // Still return success to prevent email enumeration
+      }
     }
 
     // Always return success to prevent email enumeration
